@@ -32,34 +32,37 @@ The assistant's architecture remains stable. The integrated model operates dynam
 - `src/proxima/agent/dynamic_tools/intent_classifier.py` (631 lines): LLM-reasoning-based intent classifier. Contains a **separate** `IntentType` enum (conflicting with the one in `robust_nl_processor.py`), `ClassifiedIntent` dataclass, and `IntentClassifier` class that uses LLM reasoning instead of keyword matching. Intent types here are broader categories: `FILE_OPERATION`, `DIRECTORY_OPERATION`, `GIT_OPERATION`, `TERMINAL_OPERATION`, `SEARCH_OPERATION`, `ANALYSIS_OPERATION`, `CONFIGURATION`, `INFORMATION_QUERY`, `CONVERSATION`, `MULTI_STEP`, `UNKNOWN`.
 
 **Tool System Layer:**
-- `src/proxima/agent/dynamic_tools/tool_interface.py` (985 lines): Abstract base classes and contracts. Defines `ToolInterface`, `ToolDefinition`, `ToolParameter`, `ToolResult`, `ToolCategory` (FILE_SYSTEM, GIT, GITHUB, TERMINAL, BACKEND, ANALYSIS, SYSTEM), `PermissionLevel`, `RiskLevel`. Uses Pydantic for validation.
+- `src/proxima/agent/dynamic_tools/tool_interface.py` (985 lines): Abstract base classes and contracts. Defines `ToolInterface`, `BaseTool` (abstract subclass providing standard property-based metadata), `ToolDefinition`, `ToolParameter`, `ToolResult`, `ToolCategory` (29 members: 7 top-level — FILE_SYSTEM, GIT, GITHUB, TERMINAL, BACKEND, ANALYSIS, SYSTEM — plus 22 sub-categories like FILE_READ, FILE_WRITE, GIT_BRANCH, etc.), `PermissionLevel` (READ_ONLY, READ_WRITE, EXECUTE, SYSTEM, NETWORK, ADMIN, FULL_ADMIN), `RiskLevel` (NONE, LOW, MEDIUM, HIGH, CRITICAL), `ExecutionStatus`, `ParameterType` (11 values including STRING, PATH, URL, BRANCH_NAME). Uses Pydantic for validation.
 - `src/proxima/agent/dynamic_tools/tool_registry.py` (668 lines): Central registry for dynamic tool discovery. Provides `ToolRegistry` singleton with `RegisteredTool` tracking, semantic search via `ToolSearchResult`, and `@register_tool` decorator for auto-registration. Tracks usage counts and success rates.
 - `src/proxima/agent/dynamic_tools/tool_orchestrator.py` (670 lines): Multi-tool execution coordinator. Contains `ExecutionStep`, `ExecutionPlan`, `ExecutionStepStatus`, `ExecutionPlanStatus` dataclasses. Supports dependency resolution, parallel execution via `ThreadPoolExecutor`, and error handling with retry logic.
 - `src/proxima/agent/dynamic_tools/execution_context.py` (515 lines): State carrier across tool executions. Contains `GitState`, `TerminalSession`, `FileSystemState` dataclasses. Supports snapshots for rollback capability and serialization for persistence.
-- `src/proxima/agent/dynamic_tools/llm_integration.py` (657 lines): Provider-agnostic LLM bridge. Supports OpenAI, Anthropic, Google, Ollama, Azure, Cohere via `LLMProvider` enum. Contains `ToolCall` and `ToolCallResult` dataclasses. Parses tool calls from various LLM response formats.
+- `src/proxima/agent/dynamic_tools/llm_integration.py` (657 lines): Provider-agnostic LLM bridge. Supports OpenAI, Anthropic, Google, Ollama, Azure, Cohere, and Generic via `LLMProvider` enum (7 values). Contains `ToolCall` and `ToolCallResult` dataclasses, `LLMToolConfig`, and `LLMToolIntegration` class. Parses tool calls from various LLM response formats.
 
 **Tool Implementations:**
-- `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` (910 lines): `ReadFileTool`, `WriteFileTool`, `ListDirectoryTool`, `CreateDirectoryTool`, `DeleteFileTool`, `MoveFileTool`, `SearchFilesTool`, `FileInfoTool`. All registered via `@register_tool` decorator.
+- `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` (910 lines): `ReadFileTool`, `WriteFileTool`, `ListDirectoryTool`, `SearchFilesTool`, `DeleteFileTool`, `MoveFileTool`, `FileInfoTool`. All registered via `@register_tool` decorator. **Note:** `CreateDirectoryTool` does NOT currently exist — directory creation must go through `RunCommandTool` with `mkdir`, or a new tool must be created.
 - `src/proxima/agent/dynamic_tools/tools/git_tools.py` (850 lines): `GitStatusTool`, `GitCommitTool`, `GitBranchTool`, `GitLogTool`, `GitDiffTool`, `GitAddTool`. Uses `subprocess` for git command execution with 30-second timeouts. Note: there is no `GitCheckoutTool` or `GitStashTool` — checkout is handled via `GitBranchTool` (action="switch"), and stash goes through `RunCommandTool`.
 - `src/proxima/agent/dynamic_tools/tools/terminal_tools.py` (465 lines): `RunCommandTool`, `GetWorkingDirectoryTool`, `ChangeDirectoryTool`, `EnvironmentVariableTool`. Uses PowerShell on Windows, user's shell on Unix. Has `get_shell_info()` for cross-platform shell detection.
 
 **Agent Infrastructure:**
-- `src/proxima/agent/task_planner.py` (1,098 lines): LLM-based plan generation from natural language. Contains `TaskCategory` enum (BUILD, ANALYZE, MODIFY, EXECUTE, QUERY, GIT, FILE, SYSTEM), `PlanStep` dataclass with dependency tracking, `ExecutionPlan` dataclass with status tracking, and validation/feasibility checking.
+- `src/proxima/agent/task_planner.py` (1,098 lines): LLM-based plan generation from natural language. Contains `TaskCategory` enum (BUILD, ANALYZE, MODIFY, EXECUTE, QUERY, GIT, FILE, SYSTEM, UNKNOWN — 9 values), `StepStatus` enum (PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, CANCELLED), `PlanStatus` enum (DRAFT, VALIDATED, EXECUTING, COMPLETED, FAILED, PAUSED, CANCELLED), `PlanStep` dataclass with dependency tracking, `ExecutionPlan` dataclass with status tracking, `IntentRecognitionResult` dataclass, and validation/feasibility checking.
 - `src/proxima/agent/plan_executor.py` (662 lines): Dependency-ordered execution engine. Supports sequential and parallel modes via `ExecutionMode` enum, plus dry-run mode. Contains `StepResult` and `ExecutionResult` dataclasses with duration tracking.
-- `src/proxima/agent/script_executor.py` (759 lines): Multi-language script execution. Supports Python, Bash, PowerShell, JavaScript, Lua via `ScriptLanguage` enum. Auto-detects language from extension and shebang. Contains `ScriptInfo` and `InterpreterInfo` dataclasses.
-- `src/proxima/agent/safety.py` (878 lines): Consent and safety system. Defines `ConsentType` (COMMAND_EXECUTION, FILE_MODIFICATION, GIT_OPERATION, ADMIN_ACCESS, NETWORK_ACCESS, BACKEND_MODIFICATION, SYSTEM_CHANGE, BULK_OPERATION), `ConsentDecision` (APPROVED, DENIED, APPROVED_ONCE, APPROVED_SESSION, APPROVED_ALWAYS), `ConsentRequest` dataclass with risk levels (low/medium/high/critical). Also contains `RollbackManager` and `OperationCheckpoint`.
-- `src/proxima/agent/admin_privilege_handler.py` (727 lines): Privilege detection and elevation. Contains `PrivilegeLevel` (STANDARD, ELEVATED, SYSTEM), `ElevationMethod` (UAC, SUDO, PKEXEC, RUNAS), `OperationCategory` (FILE_SYSTEM, PACKAGE_INSTALL, SERVICE_CONTROL, NETWORK, REGISTRY, PERMISSION, SYSTEM_CONFIG).
+- `src/proxima/agent/script_executor.py` (759 lines): Multi-language script execution. Supports Python, Bash, PowerShell, JavaScript, Lua, Shell, and Unknown via `ScriptLanguage` enum (7 values). Also has `ScriptSource` enum (FILE, INLINE, STDIN). Auto-detects language from extension and shebang. Contains `ScriptInfo`, `InterpreterInfo`, and `ScriptResult` dataclasses. Has `InterpreterRegistry` class for interpreter discovery and `ScriptExecutor` class.
+- `src/proxima/agent/safety.py` (878 lines): Consent and safety system. Defines `ConsentType` (COMMAND_EXECUTION, FILE_MODIFICATION, GIT_OPERATION, ADMIN_ACCESS, NETWORK_ACCESS, BACKEND_MODIFICATION, SYSTEM_CHANGE, BULK_OPERATION), `ConsentDecision` (APPROVED, DENIED, APPROVED_ONCE, APPROVED_SESSION, APPROVED_ALWAYS), `ConsentRequest` dataclass with risk levels (low/medium/high/critical), `ConsentResponse` dataclass, `OperationCheckpoint` dataclass. Also contains `RollbackManager` (checkpoint creation, undo, redo, rollback) and `SafetyManager` (consent workflow, blocked command detection via `is_blocked()`, safe operation checking via `is_safe_operation()`, consent requirement checking via `requires_consent()`, audit logging, session-scoped approvals, and built-in `BLOCKED_PATTERNS` and `SAFE_OPERATIONS` lists).
+- `src/proxima/agent/admin_privilege_handler.py` (727 lines): Privilege detection and elevation. Contains `PrivilegeLevel` (STANDARD, ELEVATED, SYSTEM, UNKNOWN — 4 values), `ElevationMethod` (UAC, SUDO, PKEXEC, RUNAS, NONE — 5 values), `OperationCategory` (FILE_SYSTEM, PACKAGE_INSTALL, SERVICE_CONTROL, NETWORK, REGISTRY, PERMISSION, SYSTEM_CONFIG), `PrivilegeInfo` dataclass (with `level`, `is_admin`, `username`, `user_id`, `groups`, `elevation_available`, `elevation_method`, `platform`), `PrivilegedOperation` dataclass, `ElevationResult` dataclass.
 - `src/proxima/agent/checkpoint_manager.py` (762 lines): Undo/redo/rollback system. Contains `FileState` (tracks file content and checksums), `Checkpoint` dataclass (with checkpoint ID, timestamp, operation, file states, metadata, rollback status).
 - `src/proxima/agent/backend_modifier.py` (801 lines): Safe code modification for quantum backends. Contains `ModificationType` (REPLACE, INSERT, DELETE, APPEND, PREPEND), `CodeChange` dataclass with diff generation, `ModificationResult` dataclass. Creates checkpoints via `RollbackManager` before every modification.
 - `src/proxima/agent/modification_preview.py` (653 lines): Diff visualization system. Contains `ModificationScope`, `DiffLineType`, `DiffLine`, `DiffHunk` dataclasses. Supports side-by-side diff display with syntax highlighting.
-- `src/proxima/agent/backend_builder.py` (1,147 lines): Backend build pipeline. Contains `BuildProfileLoader` (loads from `configs/backend_build_profiles.yaml`), `BackendBuilder` class with async build method, GPU detection integration, `BuildArtifactManager`, progress callbacks, and validation.
+- `src/proxima/agent/backend_builder.py` (1,147 lines): Backend build pipeline. Contains `BuildStatus` enum (PENDING, VALIDATING, INSTALLING_DEPS, BUILDING, TESTING, VERIFYING, COMPLETED, FAILED, CANCELLED), `DependencyCheck` dataclass, `ValidationResult` dataclass, `BuildStepResult` dataclass, `BuildResult` dataclass, `BuildProfileLoader` (loads from `configs/backend_build_profiles.yaml`), `BackendBuilder` class with async build method, GPU detection integration, progress callbacks, and validation. **Note:** `BuildArtifactManager` is imported from a separate module `src/proxima/agent/build_artifact_manager.py`, NOT defined in this file.
 - `src/proxima/agent/multi_terminal.py` (1,626 lines): Multi-terminal session management. Contains `TerminalState` enum (PENDING, STARTING, RUNNING, COMPLETED, FAILED, TIMEOUT, CANCELLED), `TerminalEventType`, `TerminalEvent`, circular output buffer (10,000 lines), `SessionManager` for 10 concurrent sessions, cross-platform command normalization, event-based state notifications.
 - `src/proxima/agent/dynamic_tools/deployment_monitoring.py` (3,000 lines): Deployment and dependency monitoring. Contains `DependencyManager` class (line 1004) focused on vulnerability scanning, license compliance checking, dependency pinning, and update strategy management. Note: this is a different concern from the `ProjectDependencyManager` created in Phase 5 — the existing `DependencyManager` handles security/compliance auditing, while `ProjectDependencyManager` handles project dependency detection, installation, and error-driven auto-fix.
+- `src/proxima/agent/dynamic_tools/error_detection.py` (1,264 lines): Error classification and analysis. Contains `ErrorSeverity` enum (6 values: DEBUG, INFO, WARNING, ERROR, CRITICAL, FATAL), `ErrorCategory` enum (20 values: FILESYSTEM, NETWORK, AUTHENTICATION, PERMISSION, RESOURCE, TIMEOUT, VALIDATION, CONFIGURATION, DEPENDENCY, GIT, GITHUB, TERMINAL, BUILD, RUNTIME, MEMORY, DISK, SYNTAX, LOGIC, CONCURRENCY, UNKNOWN), `ErrorState` enum (8 values), `ErrorContext`, `ErrorPattern`, `AnalyzedError` dataclasses, and `ErrorClassifier` class with `classify(error: Exception, context: Optional[ErrorContext])` and `classify_with_llm()` (async) methods.
+- `src/proxima/agent/terminal_state_machine.py`: Terminal lifecycle state machine for managing terminal process states. Contains `TerminalProcessState` enum (PENDING, STARTING, RUNNING, PAUSED, COMPLETED, FAILED, TIMEOUT, CANCELLED) and `TerminalStateMachine` class. **Note:** This file is in `src/proxima/agent/`, NOT in `src/proxima/agent/dynamic_tools/`.
+- `src/proxima/agent/dynamic_tools/entity_extractor.py` (814 lines): LLM-based entity extraction system (separate from the regex-based extraction in `robust_nl_processor.py`). Contains `EntityType` enum (FILE_PATH, DIRECTORY_PATH, GIT_BRANCH, GIT_COMMIT, etc.) and `EntityExtractor` class. Uses LLM reasoning and context-aware inference instead of hardcoded regex patterns. **Note:** This module's `ExtractedEntity` is different from the one in `robust_nl_processor.py` — avoid name collision when importing both.
 
 **TUI Layer:**
 - `src/proxima/tui/screens/agent_ai_assistant.py` (7,747 lines): Main AI assistant screen. Contains 5-phase response pipeline in `_generate_response()`: Phase 0 (`_try_direct_backend_operation`) for pattern-matched backend/clone/build requests; Phase 1 (`_try_robust_nl_execution`) using `RobustNLProcessor`; Phase 2 (`_analyze_and_execute_with_llm`) for LLM-based intent extraction; Phase 3 (`_try_execute_agent_command`) for keyword-based agent commands; Phase 4 (`_generate_llm_response`) for general chat. Contains ~130 methods covering all operations.
-- `src/proxima/tui/screens/execution.py` (1,914 lines): Execution monitoring screen with progress bars, stage timeline, log viewer, and AI thinking panel. Accessible via key **2**.
-- `src/proxima/tui/screens/results.py` (762 lines): Results browser with probability visualization and export engine. Accessible via key **3**.
+- `src/proxima/tui/screens/execution.py` (1,879 lines): Execution monitoring screen with progress bars, stage timeline, log viewer, and AI thinking panel. Accessible via key **2**.
+- `src/proxima/tui/screens/results.py` (734 lines): Results browser with probability visualization and export engine. Accessible via key **3**.
 - `src/proxima/tui/widgets/agent_widgets.py`: Enhanced UI widgets including `MultiTerminalView`.
 
 **Configuration:**
@@ -67,8 +70,8 @@ The assistant's architecture remains stable. The integrated model operates dynam
 
 ### Known Gaps in Current System
 1. **Two conflicting IntentType enums** — `robust_nl_processor.py` and `intent_classifier.py` each define their own `IntentType` enum with different values and semantics.
-2. **No backend-specific intents** — The `IntentType` enum in `robust_nl_processor.py` has no entries for `BACKEND_BUILD`, `BACKEND_CONFIGURE`, `BACKEND_TEST`, `BACKEND_RUN`, `BACKEND_INSTALL`, or `BACKEND_MODIFY`.
-3. **No simulation or analysis intents** — No `SIMULATION_RUN`, `ANALYZE_RESULTS`, `EXPORT_RESULTS`.
+2. **No backend-specific intents** — The `IntentType` enum in `robust_nl_processor.py` has no entries for `BACKEND_BUILD`, `BACKEND_CONFIGURE`, `BACKEND_TEST`, `BACKEND_MODIFY`, or `BACKEND_LIST`. (Note: `BACKEND_RUN` is covered by `RUN_COMMAND` with backend context; `BACKEND_INSTALL` is covered by `INSTALL_DEPENDENCY` with backend context — no separate intents needed.)
+3. **No simulation or analysis intents** — No `ANALYZE_RESULTS`, `EXPORT_RESULTS`. (Note: `SIMULATION_RUN` is covered by `RUN_SCRIPT` or `RUN_COMMAND` with script entities — no separate intent needed.)
 4. **No dependency management intents** — No `INSTALL_DEPENDENCY`, `CONFIGURE_ENVIRONMENT`.
 5. **Monolithic agent screen** — `agent_ai_assistant.py` at 7,747 lines contains all logic in a single class.
 6. **No streaming response support** — Responses are generated as complete blocks, not streamed token-by-token.
@@ -250,7 +253,10 @@ Open the file `src/proxima/agent/dynamic_tools/robust_nl_processor.py`. Locate t
 - `SYSTEM_INFO` — user wants system information (Python version, OS, GPU, disk space)
 - `ADMIN_ELEVATE` — user wants to run something with elevated privileges
 
-Keep all existing 27 entries unchanged. Only append the new entries. The total enum should have approximately 55 members.
+**Web and research intents (for Functionality 11):**
+- `WEB_SEARCH` — user wants to search the web or fetch content from a URL
+
+Keep all existing 27 entries unchanged. Only append the new entries. The total enum should have approximately 56 members.
 
 ### Step 1.2: Deprecate the IntentType Enum in intent_classifier.py
 
@@ -360,6 +366,21 @@ Open `robust_nl_processor.py` and locate the `_build_intent_keywords()` method. 
 **BACKEND_LIST keywords:**
 `list backends`, `available backends`, `show backends`, `what backends`, `backend list`, `which backends`, `supported backends`, `show build profiles`
 
+**GIT_CONFLICT_RESOLVE keywords:**
+`resolve conflict`, `fix conflict`, `merge conflict`, `conflict resolution`, `resolve merge`, `accept theirs`, `accept ours`, `abort merge`, `resolve git conflict`
+
+**WEB_SEARCH keywords:**
+`search the web`, `web search`, `google`, `look up online`, `search online`, `fetch url`, `fetch page`, `open url`, `browse`, `search internet`, `find online`
+
+> **⚠️ Keyword Collision Warning:** Several keywords above are intentionally generic to capture natural phrasing, but they risk false matches. During implementation, these MUST be disambiguated using multi-keyword scoring (requiring 2+ keywords to match) or entity context:
+> - `build`, `compile`, `make` — only trigger `BACKEND_BUILD` when combined with a backend name entity (e.g., "build cirq", "compile lret"). Standalone "build" without a backend name should fall through to `RUN_COMMAND`.
+> - `configure` — only triggers `BACKEND_CONFIGURE` when combined with "backend", "proxima", or a backend name. Standalone "configure" should fall through to `CONFIGURE_ENVIRONMENT`.
+> - `search` — only triggers `SEARCH_FILE` when combined with file/content context ("search for X in files"). Generic "search" with a URL context should trigger `WEB_SEARCH`.
+> - `log`, `show log` — triggers `GIT_LOG` only when in a git context or combined with "git", "commits". With terminal context ("show terminal log"), triggers `TERMINAL_OUTPUT`.
+> - `export` — triggers `EXPORT_RESULTS` only when combined with "results", "data", "analysis". "Export file" should be a file operation.
+> - `install` — triggers `INSTALL_DEPENDENCY` in most cases, but "install backend" should trigger `BACKEND_BUILD`.
+> - `test` — triggers `BACKEND_TEST` only when combined with "backend". "run tests" or "test the code" should trigger `RUN_COMMAND`.
+
 ### Step 1.5: Validate Enum Completeness
 
 After adding all new intent types and keywords, verify that every capability described in the requirements maps to at least one `IntentType`:
@@ -367,7 +388,7 @@ After adding all new intent types and keywords, verify that every capability des
 | Functionality | IntentTypes |
 |---|---|
 | 1. NL Planning & Execution | `PLAN_EXECUTION`, `MULTI_STEP`, `RUN_COMMAND`, `RUN_SCRIPT` |
-| 2. File System Access | `CREATE_FILE`, `READ_FILE`, `WRITE_FILE`, `DELETE_FILE`, `COPY_FILE`, `MOVE_FILE`, `NAVIGATE_DIRECTORY`, `LIST_DIRECTORY`, `CREATE_DIRECTORY`, `DELETE_DIRECTORY`, `SEARCH_FILE` |
+| 2. File System Access | `CREATE_FILE`, `READ_FILE`, `WRITE_FILE`, `DELETE_FILE`, `COPY_FILE`, `MOVE_FILE`, `NAVIGATE_DIRECTORY`, `LIST_DIRECTORY`, `CREATE_DIRECTORY` (requires new tool or `RunCommandTool` with `mkdir` — `CreateDirectoryTool` does not currently exist), `DELETE_DIRECTORY`, `SEARCH_FILE`, `SHOW_CURRENT_DIR` |
 | 3. Script Execution | `RUN_SCRIPT`, `RUN_COMMAND`, `NAVIGATE_DIRECTORY` |
 | 4. Dependency Management | `INSTALL_DEPENDENCY`, `CONFIGURE_ENVIRONMENT`, `CHECK_DEPENDENCY` |
 | 5. GitHub Operations | `GIT_CLONE`, `GIT_PULL`, `GIT_PUSH`, `GIT_COMMIT`, `GIT_ADD`, `GIT_BRANCH`, `GIT_CHECKOUT`, `GIT_FETCH`, `GIT_STATUS`, `GIT_MERGE`, `GIT_REBASE`, `GIT_STASH`, `GIT_LOG`, `GIT_DIFF`, `GIT_CONFLICT_RESOLVE` |
@@ -375,8 +396,12 @@ After adding all new intent types and keywords, verify that every capability des
 | 7. Administrative Access | `ADMIN_ELEVATE`, `SYSTEM_INFO` |
 | 8. Multi-Terminal Monitoring | `TERMINAL_MONITOR`, `TERMINAL_OUTPUT`, `TERMINAL_KILL`, `TERMINAL_LIST` |
 | 9. Complex NL Tasks | `MULTI_STEP`, `PLAN_EXECUTION` (combined with all above) |
+| 10. Query/Status | `QUERY_LOCATION`, `QUERY_STATUS` (existing intents for "where is X" and "what happened" queries) |
+| 11. Web/Research | `WEB_SEARCH` (for web content retrieval and research tasks) |
 
 If any functionality lacks a corresponding intent, add it now.
+
+> **Implementation Note — Missing tools to create:** `CreateDirectoryTool` does not exist in `filesystem_tools.py`. Either create it as a new `BaseTool` subclass (recommended — follow the pattern of `ListDirectoryTool`), or map `CREATE_DIRECTORY` to `RunCommandTool` with `mkdir` as the command. `COPY_DIRECTORY` has no tool — map to `RunCommandTool` with `xcopy`/`cp -r`.
 
 ---
 
@@ -413,7 +438,7 @@ Add a pattern that captures text inside double quotes or single quotes when prec
 
 ### Step 2.2: Enhance SessionContext for Stateful Conversations
 
-Open `robust_nl_processor.py` and locate the `SessionContext` dataclass at line 112. Currently it tracks: `current_directory`, `last_mentioned_paths`, `last_mentioned_branches`, `last_mentioned_urls`, `last_operation`, `operation_history`, `variables`, `cloned_repos`, `last_cloned_repo`, `last_cloned_url`.
+Open `robust_nl_processor.py` and locate the `SessionContext` dataclass at line 105. Currently it tracks: `current_directory`, `last_mentioned_paths`, `last_mentioned_branches`, `last_mentioned_urls`, `last_operation`, `operation_history`, `variables`, `cloned_repos`, `last_cloned_repo`, `last_cloned_url`.
 
 Add these new fields:
 
@@ -441,14 +466,21 @@ Add a method `pop_directory(self) -> Optional[str]` that pops from `working_dire
 
 Add a new method `resolve_reference(self, text: str) -> Optional[str]` to the `SessionContext` class. This method resolves contextual references to concrete values:
 
-**Resolution rules (check in order):**
-1. If `text` is `"it"`, `"that"`, `"the result"`, `"the output"` → return `self.last_operation_result`
-2. If `text` is `"the repo"`, `"the repository"`, `"that repo"` → return `self.last_cloned_repo` (the path) or `self.last_cloned_url`
-3. If `text` is `"there"`, `"that directory"`, `"that folder"` → return `self.last_mentioned_paths[0]` if available
-4. If `text` is `"that branch"`, `"the branch"` → return `self.last_mentioned_branches[0]` if available
-5. If `text` is `"the script"`, `"that script"` → return `self.last_script_executed` if available
-6. If `text` is `"back"`, `"previous directory"` → return result of `self.pop_directory()`
-7. Return `None` if no resolution found
+**Resolution rules (check in order, using surrounding verb context for disambiguation):**
+1. If `text` is `"it"` or `"that"`:
+   - If the surrounding verb context is action-oriented (`run it`, `execute it`, `build it`, `test it`, `compile it`) → return `self.last_script_executed` or `self.last_cloned_repo` (whichever is more recent), since the user wants to ACT ON something
+   - If the surrounding verb context is query-oriented (`show it`, `what is it`, `print it`, `display it`) → return `self.last_operation_result`, since the user wants to SEE a result
+   - If no verb context can be determined → return `self.last_operation_result` as fallback
+2. If `text` is `"the result"`, `"the output"` → return `self.last_operation_result`
+3. If `text` is `"the repo"`, `"the repository"`, `"that repo"` → return `self.last_cloned_repo` (the path) or `self.last_cloned_url`
+4. If `text` is `"there"`, `"that directory"`, `"that folder"` → return `self.last_mentioned_paths[0]` if available
+5. If `text` is `"that branch"`, `"the branch"` → return `self.last_mentioned_branches[0]` if available
+6. If `text` is `"the script"`, `"that script"` → return `self.last_script_executed` if available
+7. If `text` is `"that backend"`, `"the backend"` → return `self.last_built_backend` if available
+8. If `text` is `"back"`, `"previous directory"` → return result of `self.pop_directory()`
+9. Return `None` if no resolution found
+
+The `resolve_reference()` method signature should be `resolve_reference(self, text: str, verb_context: Optional[str] = None) -> Optional[str]` to accept the surrounding verb for disambiguation. The caller in `recognize_intent()` should pass the verb that precedes the pronoun.
 
 ### Step 2.4: Integrate Reference Resolution into Intent Recognition
 
@@ -519,7 +551,7 @@ The top 4 candidates come from Layer 3's sorted scores. Parse the response by lo
 
 **Layer 5 — Context-Based Inference:**
 If all above fail, use `SessionContext` to infer intent from conversation flow:
-- If last operation was `GIT_CLONE` and user says "build it" → infer `RUN_COMMAND` with the build command for the cloned repository
+- If last operation was `GIT_CLONE` and user says "build it" → infer `BACKEND_BUILD` if the cloned repo matches a known backend name, otherwise infer `RUN_COMMAND` with a generic build command for the cloned repository
 - If user says "run it" → infer `RUN_SCRIPT` using `last_script_executed` or `RUN_COMMAND` using recent context
 - If user says "go back" → infer `NAVIGATE_DIRECTORY` with `pop_directory()` result
 - If user says "install the dependencies" after cloning → infer `INSTALL_DEPENDENCY` with path context from cloned repo
@@ -530,6 +562,12 @@ If all above fail, use `SessionContext` to infer intent from conversation flow:
 When the recognized intent is `PLAN_EXECUTION` or `MULTI_STEP`, the system must construct and present an execution plan before running anything.
 
 Connect the `RobustNLProcessor`'s multi-step detection to the existing `TaskPlanner` class in `src/proxima/agent/task_planner.py`. The flow:
+
+> **Important — Two `ExecutionPlan` classes exist in the codebase:**
+> - `src/proxima/agent/task_planner.py` line 117: `ExecutionPlan` with `PlanStep` objects, `PlanStatus`, and high-level task tracking (title, description, category, steps with dependencies). This is the one to use for multi-step plan presentation and execution.
+> - `src/proxima/agent/dynamic_tools/tool_orchestrator.py` line 96: `ExecutionPlan` with `ExecutionStep` objects and `ExecutionPlanStatus`, designed for lower-level tool orchestration with parallel execution.
+>
+> Use the `task_planner.ExecutionPlan` for the agent's planning pipeline (user-facing plans). Use the `tool_orchestrator.ExecutionPlan` only if delegating to the `ToolOrchestrator` for parallel tool execution. Import them with aliases to avoid collision: `from ..task_planner import ExecutionPlan as TaskExecutionPlan` and `from .tool_orchestrator import ExecutionPlan as ToolExecutionPlan`.
 
 1. `RobustNLProcessor.recognize_intent()` detects `MULTI_STEP` and fills `intent.sub_intents` with ordered sub-intents
 2. Create a method `_create_plan_from_intents(self, sub_intents: List[Intent]) -> ExecutionPlan` in the agent assistant that converts the list of `Intent` objects into a `TaskPlanner.ExecutionPlan`:
@@ -580,6 +618,24 @@ The `IntentToolBridge` class must contain:
 - `IntentType.BACKEND_TEST` → custom handler (runs verification from YAML profile, see Phase 6, Step 6.4)
 - `IntentType.BACKEND_MODIFY` → custom handler (uses BackendModifier + CheckpointManager with consent, see Phase 6, Step 6.2)
 - `IntentType.BACKEND_LIST` → custom handler (reads `backend_build_profiles.yaml`, see Phase 6, Step 6.6)
+- `IntentType.SHOW_CURRENT_DIR` → `"get_working_directory"` (from `terminal_tools.py`)
+- `IntentType.COPY_DIRECTORY` → `"run_command"` (with `xcopy`/`cp -r` command)
+- `IntentType.GIT_FETCH` → `"run_command"` (with `git fetch` as the command)
+- `IntentType.GIT_MERGE` → `"run_command"` (with `git merge {branch}` as the command)
+- `IntentType.GIT_REBASE` → `"run_command"` (with `git rebase {branch}` as the command)
+- `IntentType.GIT_CONFLICT_RESOLVE` → custom handler (analyzes conflict files, presents options)
+- `IntentType.QUERY_LOCATION` → custom handler (searches for entity in file system, reports path)
+- `IntentType.QUERY_STATUS` → custom handler (checks SessionContext for last operation result, reports status)
+- `IntentType.SYSTEM_INFO` → `"run_command"` (with platform-appropriate system info commands)
+- `IntentType.CHECK_DEPENDENCY` → custom handler (uses ProjectDependencyManager)
+- `IntentType.CONFIGURE_ENVIRONMENT` → `"run_command"` (with venv/env var commands)
+- `IntentType.TERMINAL_MONITOR` → custom handler (uses TerminalOrchestrator.get_all_terminals)
+- `IntentType.TERMINAL_OUTPUT` → custom handler (uses TerminalOrchestrator.get_output)
+- `IntentType.TERMINAL_KILL` → custom handler (uses TerminalOrchestrator.kill_terminal)
+- `IntentType.TERMINAL_LIST` → custom handler (uses TerminalOrchestrator.get_all_terminals)
+- `IntentType.DELETE_DIRECTORY` → `"run_command"` (with `rmdir`/`rm -rf` — requires consent)
+- `IntentType.CREATE_DIRECTORY` → `"run_command"` (with `mkdir` command — or new `CreateDirectoryTool` if created)
+- `IntentType.WEB_SEARCH` → custom handler (uses `AgenticFetchTool` from Phase 16.2 — map to a no-op or "not yet available" stub until Phase 16 is implemented)
 
 **A method `build_tool_arguments(intent: Intent) -> Dict[str, Any]`** that converts the extracted entities from an `Intent` into the parameter dictionary expected by the target tool. For example:
 - For `GIT_CLONE`: extract `url` entity → `{"command": f"git clone {url} {target_path}"}`, extract `branch` entity → append `--branch {branch}`, extract `path` entity → set as clone destination
@@ -641,7 +697,7 @@ Enable the integrated model to fully interact with the local file system — rea
 
 ### Step 4.1: Enhance File System Tool Executors via the Bridge
 
-The existing tools in `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` already implement `ReadFileTool`, `WriteFileTool`, `ListDirectoryTool`, `CreateDirectoryTool`, `DeleteFileTool`, `MoveFileTool`, `SearchFilesTool`, `FileInfoTool`. These tools already use the `@register_tool` decorator and are discoverable via `ToolRegistry`.
+The existing tools in `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` already implement `ReadFileTool`, `WriteFileTool`, `ListDirectoryTool`, `DeleteFileTool`, `MoveFileTool`, `SearchFilesTool`, `FileInfoTool`. These tools already use the `@register_tool` decorator and are discoverable via `ToolRegistry`. **Note:** `CreateDirectoryTool` does NOT exist yet — see Step 4.2 below for creation instructions, or dispatch to `RunCommandTool` with `mkdir`.
 
 In `IntentToolBridge.build_tool_arguments()`, add argument construction logic for each file intent:
 
@@ -672,6 +728,11 @@ In `IntentToolBridge.build_tool_arguments()`, add argument construction logic fo
 - Extract `path` entity → `directory`
 - If the entity resolves to a relative path, prefix with `SessionContext.current_directory`
 - After execution, call `SessionContext.push_directory(new_path)`
+
+**For `CREATE_DIRECTORY`:**
+- Extract `path` entity → the directory path to create
+- Since `CreateDirectoryTool` does not currently exist in `filesystem_tools.py`, dispatch to `RunCommandTool` with command `mkdir -p {path}` (Unix) or `New-Item -ItemType Directory -Path "{path}" -Force` (Windows)
+- **Recommended**: Create a dedicated `CreateDirectoryTool` in `filesystem_tools.py` following the `ListDirectoryTool` pattern, using `os.makedirs(path, exist_ok=True)`. Register via `@register_tool`.
 
 **For `LIST_DIRECTORY`:**
 - Extract `path` entity → `directory`
@@ -773,7 +834,7 @@ The `ProjectDependencyManager` class must contain:
 **A method `detect_project_dependencies(project_path: str) -> Dict[str, Any]`** that scans a directory for dependency specification files and returns a structured description:
 1. Check for `requirements.txt` → parse it line by line, extracting package names and version constraints
 2. Check for `setup.py` → extract `install_requires` from the contents (regex-based extraction of the list)
-3. Check for `pyproject.toml` → parse using Python's `tomllib` (stdlib since Python 3.11), extract `[project.dependencies]` and `[project.optional-dependencies]`
+3. Check for `pyproject.toml` → parse using Python's `tomllib` (stdlib since Python 3.11). **For Python 3.10 compatibility**, use a conditional import: `try: import tomllib; except ModuleNotFoundError: import tomli as tomllib` and add `tomli` to `requirements-build.txt` as a fallback dependency. Extract `[project.dependencies]` and `[project.optional-dependencies]`.
 4. Check for `setup.cfg` → parse using `configparser`, extract `install_requires` from `[options]`
 5. Check for `package.json` → parse as JSON, extract `dependencies` and `devDependencies`
 6. Check for `Pipfile` → parse using `tomllib`, extract `[packages]`
@@ -971,8 +1032,8 @@ Before applying the change, show a diff preview using `ModificationPreviewGenera
    - `modification_type`: one of `ModificationType.REPLACE`, `INSERT`, `DELETE`, `APPEND`, `PREPEND`
    - `old_content`: the current content (or specific lines)
    - `new_content`: the proposed replacement
-2. Generate a diff via `CodeChange.get_diff()` — this produces a unified diff string
-3. Use `ModificationPreviewGenerator` to generate and format the diff with Rich syntax highlighting:
+2. Generate a diff via `CodeChange.get_diff()` (defined at line 75 of `backend_modifier.py`, uses `difflib.unified_diff`) — this produces a unified diff string
+3. Use `ModificationPreviewGenerator.generate_preview()` (defined at line 258 of `modification_preview.py`, signature: `generate_preview(self, file_path, old_content, new_content, modification_type="modify", description="") -> ModificationPreview`) to generate and format the diff with Rich syntax highlighting:
    - Green for additions, red for deletions, gray for context lines
    - Line numbers on both sides
 4. Display the formatted diff in the chat:
@@ -1358,7 +1419,7 @@ Create a new file `src/proxima/agent/terminal_orchestrator.py`. This module wrap
 2. Create a `subprocess.Popen` object with `stdout=subprocess.PIPE`, `stderr=subprocess.PIPE`, `stdin=subprocess.PIPE`, `shell=True`
 3. On Windows, use PowerShell: prepend `powershell -NoProfile -Command` to the command
 4. Register the process with the `MultiTerminalMonitor` from `multi_terminal.py` for state tracking
-5. Register with `TerminalStateMachine` from `terminal_state_machine.py` for lifecycle management
+5. Register with `TerminalStateMachine` from `src/proxima/agent/terminal_state_machine.py` (**Note:** this file is in `src/proxima/agent/`, NOT in `dynamic_tools/`) for lifecycle management
 6. Start a background thread that reads stdout/stderr line by line and stores each line in a circular buffer (from `multi_terminal.py`'s `CircularOutputBuffer`, capacity 10,000 lines)
 7. Store the terminal info in `SessionContext.active_terminals[terminal_id]`
 8. Emit a `TerminalEvent` with `event_type=STARTED`
@@ -1515,13 +1576,17 @@ Create a new file `src/proxima/agent/dynamic_tools/agent_loop.py`. This module i
 **Constructor `__init__(self, nl_processor, tool_bridge, llm_router, llm_tool_integration, session_context, ui_callback)`:**
 - `nl_processor`: the `RobustNLProcessor` instance
 - `tool_bridge`: the `IntentToolBridge` instance
-- `llm_router`: the `LLMRouter` instance from `src/proxima/intelligence/llm_router.py` (may be None if no LLM is integrated). Provides `route()` and `route_with_fallback()` methods for sending requests to the configured LLM provider. Streaming is done at the provider level via `provider.stream_send()`.
+- `llm_router`: the `LLMRouter` instance from `src/proxima/intelligence/llm_router.py` (may be None if no LLM is integrated). Provides `route()` and `route_with_fallback()` methods for sending requests to the configured LLM provider. **Note:** `LLMRouter` does NOT have a `stream_send()` method. Streaming is done at the provider level: get the provider via `_pick_provider()`, then call `provider.stream_send(request, api_key, callback)`. Not all providers implement streaming — see Step 10.4 for the detection pattern.
 - `llm_tool_integration`: the `LLMToolIntegration` instance from `llm_integration.py` (may be None). Provides `parse_tool_calls()` for extracting structured tool calls from LLM responses.
 - `session_context`: the `SessionContext` instance
 - `ui_callback`: a callable that takes a message string and displays it in the TUI chat
 
 **Method `process_message(message: str) -> str`:**
-This is the main entry point, called from `agent_ai_assistant.py` when the user sends a message. The loop works as follows:
+This is the main entry point, called from `agent_ai_assistant.py` when the user sends a message.
+
+> **Important — Synchronous baseline:** The existing `_generate_response()` method in `agent_ai_assistant.py` is **synchronous** (regular `def`, not `async def`). The `AgentLoop.process_message()` should also be synchronous for initial implementation. Streaming token display (Step 10.4) requires using Textual's `call_from_thread()` or `Worker` API for background execution — NOT converting the entire method to `async`. See Step 10.4 for the specific Textual integration.
+
+The loop works as follows:
 
 **Turn 1 — Intent Recognition:**
 1. Call `nl_processor.recognize_intent(message)` to get an `Intent`
@@ -1553,7 +1618,7 @@ This is the main entry point, called from `agent_ai_assistant.py` when the user 
      - Continue the loop (goto step 3 with updated conversation)
    - If no tool call detected (the response is a final answer):
      - Return the response text
-5. **Loop limit**: Maximum 15 iterations per user message. After 15 iterations, summarize what was accomplished and what remains, then stop.
+5. **Loop limit**: Maximum 10 iterations per user message. After 10 iterations, summarize what was accomplished and what remains, then stop. (Lower than typical agentic systems because Proxima's tools are coarser-grained — each iteration does more work.)
 6. **Error in loop**: If a tool execution fails, include the error in the next LLM message so it can reason about alternatives.
 
 **Result Evaluation:**
@@ -1626,10 +1691,11 @@ Replace the current 5-phase `_generate_response()` method in `agent_ai_assistant
    ```
 
 2. In `_generate_response(message)`:
-   - Remove the current PHASE 0 through PHASE 4 cascade
-   - Replace with: `result = self._agent_loop.process_message(message)`
+   - Replace the current PHASE 0 through PHASE 4 cascade with: `result = self._agent_loop.process_message(message)`
    - Display the result via `self._show_ai_message(result)`
    - Update stats and save session (keep existing post-response logic)
+
+   > **Migration note:** The current 5-phase cascade (`_try_direct_backend_operation` → `_try_robust_nl_execution` → `_analyze_and_execute_with_llm` → `_try_execute_agent_command` → `_generate_llm_response`) is deeply integrated into 7,747 lines of code. **Recommended approach:** Rather than deleting all five phases at once, keep the old methods as private fallback methods (rename to `_legacy_try_direct_backend_operation`, etc.) and route through `AgentLoop.process_message()` first. If the agent loop fails or returns no result, fall back to the legacy path. Remove the legacy methods only after the agent loop is verified to handle all cases. This reduces the risk of breaking the entire assistant during migration.
 
 3. The `AgentLoop.process_message()` handles all of:
    - Simple commands (high-confidence intent → direct dispatch)
@@ -1645,14 +1711,16 @@ This refactoring eliminates the need for the current Phase 0 (`_try_direct_backe
 If the integrated LLM supports streaming (Ollama and most API providers do), enable token-by-token display:
 
 1. In `AgentLoop`, when the LLM is called in the multi-turn loop:
-   - Check if the LLM provider supports streaming by calling `hasattr(provider, 'stream_send')` — the `LLMRouter` in `llm_router.py` already defines `stream_send()` on providers that support it (Ollama, OpenAI, Anthropic, Google). Use `stream_send()` when available.
-   - Create an async generator that yields tokens
+   - Check if the provider actually implements streaming: `stream_send()` is defined as an abstract method on the base `LLMProvider` class in `llm_router.py` (line 132), so `hasattr(provider, 'stream_send')` will **always** return `True`. Instead, check whether the provider's `stream_send` is actually overridden (not the base stub). Use this pattern: `provider_instance = self._llm_router._pick_provider(request)` and check if the provider class has a concrete `stream_send` implementation. Alternatively, maintain a list of known streaming-capable provider names: `STREAMING_PROVIDERS = {'ollama', 'openai', 'anthropic', 'google_gemini', 'deepseek', 'groq', 'mistral', 'together', 'cohere', 'xai', 'huggingface', 'lm_studio'}`.
+   - **Note:** `stream_send()` exists on individual provider subclasses (e.g., `OllamaProvider.stream_send`, `OpenAIProvider.stream_send`), NOT on `LLMRouter` itself. The `LLMRouter` only has `route()` and `route_with_fallback()`. To stream, you must get the provider instance directly: `provider = self._llm_router._pick_provider(request)`, then call `provider.stream_send(request, api_key, callback)`.
+   - Create a generator that yields tokens via the `callback` parameter of `stream_send(request, api_key, callback)` — the callback receives each token string
    - Pass tokens to the UI callback incrementally
 
 2. In `agent_ai_assistant.py`, update `_show_ai_message()` to support incremental display:
    - Create a `StreamingMessageWidget` or modify the existing `WordWrappedRichLog` to accept incremental appends
    - When streaming starts, create a new message entry in the chat
    - As tokens arrive, append them to the same message entry
+   - **Textual integration**: Since `_generate_response()` is synchronous, use Textual's `Worker` API (`self.run_worker()`) to run the streaming loop in a background thread. Use `self.call_from_thread(self._append_token, token)` to safely update the UI from the worker thread. Alternatively, use `app.call_later()` for deferred UI updates.
    - Re-render the Rich text after each sentence boundary (. ! ? newline) to avoid excessive re-rendering
    - When streaming completes, finalize the message
 
@@ -1669,10 +1737,16 @@ For conversations that run long (many tool executions accumulating results), man
 
 1. Track the approximate token count of the conversation history. Use a simple heuristic: 1 token ≈ 4 characters (for English text).
 
-2. Before each LLM call, check if the total prompt + history exceeds 80% of the model's context window:
-   - Ollama llama2: 4,096 tokens
-   - GPT-4 / Claude: 128,000 tokens (effectively unlimited for this use case)
-   - Other models: check via the LLM router's model configuration
+2. Before each LLM call, check if the **current conversation history** (not cumulative usage) exceeds 80% of the model's context window. Calculate the current size by summing the approximate token count of all messages that will be sent in this request:
+   - System prompt tokens
+   - Conversation history messages tokens
+   - Current user message tokens
+   - Expected response buffer (~1,000 tokens)
+   
+   Model context windows:
+   - Ollama models: varies by model (llama2: 4,096; llama3: 8,192; mistral: 32,768; codellama: 16,384). Query via Ollama API `/api/show` for the specific model's `context_length`.
+   - GPT-4 / Claude: 128,000+ tokens (effectively unlimited for this use case)
+   - Other models: check the `TokenPricing.context_window` field (default 128,000) from `llm_router.py` line 6735
 
 3. If the limit is approaching:
    - Summarize the oldest conversation entries: take the oldest 10 entries, send them to the LLM with "Summarize this conversation so far in 200 words", replace the 10 entries with the summary
@@ -1691,12 +1765,14 @@ Ensure every operation has proper error handling, meaningful error messages, rec
 
 Add a new file `src/proxima/agent/agent_error_handler.py`. This module provides agent-specific error classification and recovery strategies.
 
-> **Important:** An `ErrorClassifier` class already exists in `src/proxima/agent/dynamic_tools/error_detection.py` with its own `classify(error: Exception, context: Optional[ErrorContext])` method and the `ErrorCategory` enum. The new `AgentErrorHandler` class below **wraps** the existing `ErrorClassifier` for classifying raw terminal output (strings + exit codes) and adds recovery strategy logic. Import and reuse `ErrorCategory` from `error_detection.py` — do NOT redefine it.
+> **Important:** An `ErrorClassifier` class already exists in `src/proxima/agent/dynamic_tools/error_detection.py` with its own `classify(error: Exception, context: Optional[ErrorContext])` method and the `ErrorCategory` enum (21 values: FILESYSTEM, NETWORK, AUTHENTICATION, PERMISSION, RESOURCE, TIMEOUT, VALIDATION, CONFIGURATION, DEPENDENCY, GIT, GITHUB, TERMINAL, BUILD, RUNTIME, MEMORY, DISK, SYNTAX, LOGIC, CONCURRENCY, UNKNOWN). The new `AgentErrorHandler` class below **wraps** the existing `ErrorClassifier` for classifying raw terminal output (strings + exit codes) and adds recovery strategy logic. Import and reuse `ErrorCategory` from `error_detection.py` — do NOT redefine it.
 
 **The `AgentErrorHandler` class maps terminal output to existing `ErrorCategory` values with recovery strategies:**
 
 - `ErrorCategory.PERMISSION`: File access denied, admin needed, git auth failure
   - Recovery: suggest running with admin privileges or fixing permissions
+- `ErrorCategory.AUTHENTICATION`: Git credential failure, API key invalid, SSH key missing
+  - Recovery: suggest configuring credentials or SSH keys
 - `ErrorCategory.FILESYSTEM`: File, directory, package, branch, command not found
   - Recovery: list similar files/directories, suggest correct spelling
 - `ErrorCategory.NETWORK`: DNS failure, timeout, connection refused, SSL error
@@ -1713,6 +1789,16 @@ Add a new file `src/proxima/agent/agent_error_handler.py`. This module provides 
   - Recovery: suggest freeing resources, point to resource monitor
 - `ErrorCategory.GIT`: Merge conflict, detached HEAD, dirty working tree
   - Recovery: specific git commands to resolve the situation
+- `ErrorCategory.RUNTIME`: Unexpected runtime errors, assertion failures, unhandled exceptions
+  - Recovery: show stack trace, suggest debugging approach
+- `ErrorCategory.VALIDATION`: Invalid input, schema mismatch, config validation failure
+  - Recovery: show expected format, suggest corrections
+- `ErrorCategory.CONFIGURATION`: Missing config file, invalid settings, misconfigured tool
+  - Recovery: suggest creating/fixing config file
+- `ErrorCategory.TERMINAL`: Shell error, command not found, process crash
+  - Recovery: verify shell availability, suggest alternative commands
+- `ErrorCategory.LOGIC` / `ErrorCategory.CONCURRENCY`: Race conditions, deadlocks, logic errors
+  - Recovery: suggest code review or debugging
 - (User cancellation): No `ErrorCategory` equivalent — handle separately as a control flow event, not an error
 
 **Method `classify_output(error_output: str, exit_code: int) -> Tuple[ErrorCategory, str, Optional[str]]`:**
@@ -1722,6 +1808,7 @@ Note: This method is named `classify_output` (not `classify`) to avoid confusion
 
 Uses regex pattern matching on the error output:
 - `"Permission denied"` or `"Access is denied"` → `ErrorCategory.PERMISSION`
+- `"Authentication failed"` or `"Invalid credentials"` or `"could not read Username"` → `ErrorCategory.AUTHENTICATION`
 - `"No such file"` or `"not found"` or `"not recognized"` → `ErrorCategory.FILESYSTEM`
 - `"Could not resolve host"` or `"Connection refused"` or `"timed out"` → `ErrorCategory.NETWORK`
 - `"ModuleNotFoundError"` or `"No module named"` → `ErrorCategory.DEPENDENCY`
@@ -1866,7 +1953,7 @@ User types in the AI assistant (key 6):
 ### Step 12.2: Example B — Local Path, Branch, Build, Configure
 
 User types:
-> "The LRET repo is at C:\Users\dell\Pictures\Screenshots\LRET. Clone the cirq-scalability-comparison branch, build and compile it, configure Proxima to use it"
+> "The LRET repo is at C:\Users\dell\Pictures\Screenshots\LRET. Checkout the cirq-scalability-comparison branch, build and compile it, configure Proxima to use it"
 
 **System processing:**
 
@@ -2044,10 +2131,10 @@ Verify performance meets these targets:
 
 ---
 
-## Phase 14: Final Integration and Polish
+## Phase 14: Core Integration and Wiring
 
 ### Objective
-Wire everything together, ensure all components communicate correctly, and verify the system is production-ready.
+Wire the core agent components together and ensure all modules communicate correctly. (Phases 15 and 16 add session persistence and Crush-inspired capabilities on top of this foundation.)
 
 ### Step 14.1: Module Registration and Initialization
 
@@ -2072,7 +2159,7 @@ tool_interface.py ← tool_registry.py ← tools/*.py
                   ← tool_orchestrator.py ← llm_integration.py
 robust_nl_processor.py (standalone, no imports from above)
 intent_tool_bridge.py ← robust_nl_processor.py, tool_registry.py, tools/*.py
-dependency_manager.py (standalone, uses subprocess only; contains ProjectDependencyManager)
+dependency_manager.py (uses subprocess, tomllib/tomli, pyyaml; contains ProjectDependencyManager)
 terminal_orchestrator.py ← multi_terminal.py, terminal_state_machine.py
 agent_error_handler.py ← error_detection.py (uses existing ErrorCategory and ErrorClassifier)
 system_prompt_builder.py ← tool_registry.py, execution_context.py
@@ -2092,7 +2179,7 @@ Define custom Textual `Message` classes for communication between the agent and 
 4. `AgentPlanStarted(plan_id: str, steps: List[Dict])` — posted when plan execution begins
 5. `AgentPlanStepCompleted(plan_id: str, step_id: int, success: bool)` — posted after each completed step
 
-These messages are defined in a shared file `src/proxima/tui/messages/agent_messages.py`. Both `agent_ai_assistant.py` and `execution.py` import from this file.
+These messages are defined in a shared file `src/proxima/tui/messages/agent_messages.py`. **Note:** This directory does not currently exist and must be created. Both `agent_ai_assistant.py` and `execution.py` import from this file.
 
 In `ExecutionScreen`, add handlers:
 - `on_agent_terminal_started`: create a new tab or update the main log with "[Starting: {command}]"
@@ -2276,8 +2363,8 @@ DEFAULT_CONTEXT_WINDOW = 4_096             # default for unknown models (e.g., O
 ```
 
 **Method `should_summarize(model_context_window: int) -> bool`:**
-1. Calculate total tokens used: `session.prompt_tokens + session.completion_tokens`
-2. Calculate remaining: `model_context_window - total_tokens`
+1. Calculate the **current conversation size** by estimating tokens for all messages that would be sent to the LLM in the next request. Use `self.get_messages_for_llm()` and estimate: `current_tokens = sum(len(msg.content) // 4 for msg in messages)` (1 token ≈ 4 chars heuristic). Do NOT use `session.prompt_tokens + session.completion_tokens` — those are cumulative lifetime values, not the current conversation size.
+2. Calculate remaining: `remaining = model_context_window - current_tokens`
 3. If `model_context_window > LARGE_CONTEXT_WINDOW_THRESHOLD`:
    - Return `True` if `remaining <= LARGE_CONTEXT_WINDOW_BUFFER`
 4. Else:
@@ -2423,6 +2510,18 @@ When a new session receives its first user message:
    - Update `session.title` with the generated title
 3. If no LLM is available, use the first 8 words of the first user message, truncated with "..."
 4. Update the TUI title bar to display the session title
+
+### Step 15.6: Session Manager Tests
+
+Create `tests/test_session_manager.py` with the following test cases:
+
+1. **Session persistence:** Create a session, add messages, save it. Load it back and verify all messages, metadata, and timestamps are preserved.
+2. **Session listing and switching:** Create 3 sessions, list them, switch between them. Verify the correct session is active after each switch.
+3. **Session import:** Create a mock JSON file in `exports/` format, import it via `AgentSessionManager.import_session()`. Verify the imported messages appear correctly.
+4. **Session deletion:** Create a session, delete it, verify it no longer appears in `list_sessions()` and its file is removed from disk.
+5. **Auto-summarization trigger:** Mock having a session with messages that exceed 80% of a small context window. Verify `_should_summarize()` returns `True` and `_summarize_old_messages()` produces a valid summary prefix.
+6. **Title auto-generation:** Add a first message to a new session. Verify that a title is generated (mock the LLM response) and stored on the session.
+7. **Context window calculation:** Verify `get_messages_for_llm()` returns messages that fit within the model's context window, with older messages summarized.
 
 ---
 
@@ -2614,18 +2713,21 @@ class AgenticFetchTool(BaseTool):
 
 ### Step 16.3: Implement the Tool Permission System
 
-Create a new file `src/proxima/agent/tool_permissions.py`. This module manages per-tool consent requests with session-scoped auto-approval, building on the existing `safety.py` consent system but with a more granular, Crush-inspired approach.
+Create a new file `src/proxima/agent/tool_permissions.py`. This module provides a Crush-inspired permission layer that **wraps and extends** the existing `SafetyManager` from `safety.py`. The existing `SafetyManager` already has `is_blocked()`, `is_safe_operation()`, `requires_consent()`, `request_consent()`, `respond_to_consent()`, and `wait_for_consent()` methods, plus built-in `BLOCKED_PATTERNS` and `SAFE_OPERATIONS` lists. The `ToolPermissionManager` adds: YOLO mode, an extended blocked-commands list, the three-option consent flow (Allow Once / Allow for Session / Deny), and configurable allowed-tools from YAML.
+
+> **Important:** Do NOT duplicate the blocked command patterns or consent workflow that already exists in `SafetyManager`. Instead, compose `SafetyManager` inside `ToolPermissionManager` and delegate to it.
 
 **The `ToolPermissionManager` class contains:**
 
-**Constructor `__init__(self, config: Dict[str, Any])`:**
-- `allowed_tools: List[str]` — tools that never require permission (loaded from config)
+**Constructor `__init__(self, safety_manager: SafetyManager, config: Dict[str, Any])`:**
+- `_safety: SafetyManager` — the existing SafetyManager instance (delegate to it for blocking, consent)
+- `allowed_tools: List[str]` — tools that never require permission (loaded from config YAML, extends SafetyManager's `SAFE_OPERATIONS`)
 - `session_permissions: Dict[str, List[str]]` — session-scoped auto-approvals (session_id → list of tool:action keys)
-- `skip_all: bool` — YOLO mode flag (auto-approve everything)
-- `blocked_commands: List[str]` — commands that are NEVER allowed
-- `pending_requests: Dict[str, asyncio.Event]` — active permission requests awaiting user response
+- `skip_all: bool` — YOLO mode flag (auto-approve everything except blocked commands)
+- `_extended_blocked: List[str]` — additional blocked patterns beyond SafetyManager's built-in list
+- `pending_requests: Dict[str, threading.Event]` — active permission requests awaiting user response (**Note:** uses `threading.Event` NOT `asyncio.Event`, since the agent loop is synchronous)
 
-**Default `allowed_tools` (safe, read-only operations):**
+**Default `allowed_tools` (extends SafetyManager's SAFE_OPERATIONS):**
 ```python
 DEFAULT_ALLOWED_TOOLS = [
     "ReadFileTool",
@@ -2639,36 +2741,38 @@ DEFAULT_ALLOWED_TOOLS = [
 ]
 ```
 
-**`blocked_commands` list:**
+**Extended `blocked_commands` list (supplements SafetyManager's BLOCKED_PATTERNS):**
 ```python
-BLOCKED_COMMANDS = [
-    "rm -rf /", "rm -rf /*", "rm -rf ~",
+EXTENDED_BLOCKED_COMMANDS = [
+    "rm -rf /*", "rm -rf ~",
     "mkfs.", "dd if=", "dd of=/dev/",
-    ":(){:|:&};:",                                    # Fork bomb
-    "chmod -R 777 /", "chmod -R 000 /",
-    "shutdown", "reboot", "halt", "poweroff",
+    "chmod -R 000 /",
+    "poweroff",
     "init 0", "init 6",
     "> /dev/sda", "cat /dev/zero >",
     "mv / /dev/null",
     "wget -O- | sh", "curl | sh", "curl | bash",     # Piped execution from web
     "python -c 'import os; os.remove",                # Destructive Python one-liners
-    "format C:", "del /F /S /Q C:\\",                  # Windows destructive
+    "del /F /S /Q C:\\",                               # Windows destructive
 ]
+# Note: "rm -rf /", "format", ":(){:|:&};:", "shutdown", "reboot", "del /f /s /q C:\\"
+# are already in SafetyManager.BLOCKED_PATTERNS — no duplication needed
 ```
 
 **Method `check_permission(session_id: str, tool_name: str, action: str, params: Dict) -> PermissionResult`:**
 
 The `PermissionResult` is an enum: `ALLOWED`, `DENIED`, `NEEDS_CONSENT`.
 
-1. If `skip_all` is True → return `ALLOWED`
-2. Check if tool_name is in `allowed_tools` → return `ALLOWED`
-3. Check if `{tool_name}:{action}` is in `session_permissions[session_id]` → return `ALLOWED`
-4. If the tool is `RunCommandTool` and the command matches any `blocked_commands` pattern → return `DENIED` (cannot be overridden)
-5. Check if the command is a safe read-only command (matches `SAFE_READ_COMMANDS = ["ls", "cat", "head", "tail", "find", "grep", "wc", "file", "stat", "echo", "pwd", "whoami", "uname", "date", "hostname"]`) → return `ALLOWED`
-6. Otherwise → return `NEEDS_CONSENT`
+1. If the tool is `RunCommandTool` and the command matches ANY blocked pattern (check both `self._safety.is_blocked(command)` and `self._extended_blocked`) → return `DENIED` (cannot be overridden, even in YOLO mode)
+2. If `skip_all` is True → return `ALLOWED` (YOLO mode, skips all other checks)
+3. Check if tool_name is in `allowed_tools` → return `ALLOWED`
+4. Check if `self._safety.is_safe_operation(tool_name)` → return `ALLOWED`
+5. Check if `{tool_name}:{action}` is in `session_permissions[session_id]` → return `ALLOWED`
+6. Check if the command is a safe read-only command (matches `SAFE_READ_COMMANDS = ["ls", "cat", "head", "tail", "find", "grep", "wc", "file", "stat", "echo", "pwd", "whoami", "uname", "date", "hostname"]`) → return `ALLOWED`
+7. Otherwise → return `NEEDS_CONSENT`
 
 **Method `request_consent(session_id: str, tool_name: str, action: str, description: str, params: Dict) -> bool`:**
-1. Create a `ConsentRequest` (reuse from `safety.py`):
+1. Delegate to `self._safety.request_consent()` to create a `ConsentRequest`:
    ```
    Tool: {tool_name}
    Action: {action}
@@ -2676,10 +2780,10 @@ The `PermissionResult` is an enum: `ALLOWED`, `DENIED`, `NEEDS_CONSENT`.
    Parameters: {formatted_params}
    ```
 2. Display a consent dialog in the TUI with three options:
-   - **Allow** (once) — grants permission for this single execution
-   - **Allow for Session** — adds `{tool_name}:{action}` to `session_permissions[session_id]`, auto-approves future identical requests
-   - **Deny** — blocks this execution, returns False
-3. Wait for user response via asyncio Event
+   - **Allow** (once) — grants permission for this single execution (`ConsentDecision.APPROVED_ONCE`)
+   - **Allow for Session** — adds `{tool_name}:{action}` to `session_permissions[session_id]`, auto-approves future identical requests (`ConsentDecision.APPROVED_SESSION`)
+   - **Deny** — blocks this execution, returns False (`ConsentDecision.DENIED`)
+3. Wait for user response via `threading.Event` (synchronous wait)
 4. Return True if allowed, False if denied
 
 **Integration with `IntentToolBridge`:**
@@ -2808,7 +2912,9 @@ Rules:
 
 Extend the LLM integration to support configuring separate models for different purposes.
 
-**Modify `llm_integration.py`:**
+**Create a new file `src/proxima/agent/dual_model_router.py`:**
+
+> **Note:** This is a NEW file in the `agent/` directory (NOT in `llm_integration.py`), because `DualModelRouter` wraps `LLMRouter` from `src/proxima/intelligence/llm_router.py` — a different package. Placing it in `llm_integration.py` would create an awkward cross-package dependency.
 
 Add a `ModelRole` enum:
 ```python
@@ -2817,9 +2923,9 @@ class ModelRole(Enum):
     SMALL = "small"    # Title generation, summarization, sub-agents
 ```
 
-**Add a `DualModelRouter` class:**
+**The `DualModelRouter` class:**
 
-> **Note:** `LLMRouter.__init__` takes `(settings: Settings | None, consent_prompt: Callable | None)`. The `DualModelRouter` creates two routers by cloning the base `Settings` and overriding the provider/model fields for each role.
+> **Note:** `LLMRouter.__init__` takes `(settings: Settings | None = None, consent_prompt: Callable[[str], bool] | None = None)`. The `DualModelRouter` creates two routers by cloning the base `Settings` and overriding the provider/model fields for each role.
 
 ```python
 class DualModelRouter:
@@ -2827,16 +2933,19 @@ class DualModelRouter:
         self._consent_prompt = consent_prompt
         # Large model router uses the base settings (settings.llm.provider + settings.llm.model)
         self._large = LLMRouter(settings=settings, consent_prompt=consent_prompt)
-        # Small model router — if agent.models.small is configured in settings,
-        # create a Settings copy with overridden llm.provider/llm.model; else reuse large
-        small_cfg = getattr(settings, 'agent_small_model', None)
-        if small_cfg:
+        # Small model router — read 'agent.models.small' from configs/default.yaml.
+        # Access via settings object: settings has an 'agent' section once default.yaml is updated.
+        # The settings object structure mirrors the YAML: settings.agent['models']['small']
+        agent_cfg = getattr(settings, 'agent', None) or {}
+        models_cfg = agent_cfg.get('models', {}) if isinstance(agent_cfg, dict) else {}
+        small_cfg = models_cfg.get('small', None)
+        if small_cfg and isinstance(small_cfg, dict):
             small_settings = settings.model_copy(deep=True)
             small_settings.llm.provider = small_cfg.get('provider', settings.llm.provider)
             small_settings.llm.model = small_cfg.get('model', settings.llm.model)
             self._small = LLMRouter(settings=small_settings, consent_prompt=consent_prompt)
         else:
-            self._small = self._large
+            self._small = self._large  # Use same model for both if no small model configured
 
     def get_router(self, role: ModelRole = ModelRole.LARGE) -> LLMRouter:
         if role == ModelRole.SMALL:
@@ -2854,7 +2963,7 @@ class DualModelRouter:
 **Usage pattern:**
 - `AgentLoop` uses `ModelRole.LARGE` for the main reasoning loop
 - `SubAgent` uses `ModelRole.SMALL` for search and context tasks
-- `AgentSessionManager.summarize_session()` uses `ModelRole.LARGE` (summaries need accuracy)
+- `AgentSessionManager.summarize_session()` uses `ModelRole.SMALL` (summaries are cost-sensitive; the small model is sufficient for summarization since the conversation content provides all needed context)
 - `AgentSessionManager._generate_title()` uses `ModelRole.SMALL` (titles are simple)
 - `AgenticFetchTool` uses `ModelRole.SMALL` for web content analysis
 
@@ -2914,6 +3023,17 @@ Update `agent_loop.py` to incorporate all Phase 16 capabilities:
 
 5. **In `process_message()`**, use `dual_model_router.get_router(ModelRole.LARGE)` for the main reasoning loop
 
+### Step 16.7: Tool Permissions Tests
+
+Create `tests/test_tool_permissions.py` with the following test cases:
+
+1. **Allowlist:** Configure an allowlist of tool names. Verify that allowed tools return `ALLOWED` from `check_permission()` and non-listed tools return `NEEDS_CONSENT`.
+2. **Blocklist:** Configure a blocklist with glob patterns (e.g., `"rm -rf *"`). Verify that blocked commands return `DENIED` with explanation.
+3. **Session-scoped auto-approval:** Grant consent for a tool. Verify that subsequent calls for the same tool within the session return `ALLOWED` without re-prompting. Verify the approval does NOT persist after session reset.
+4. **Consent flow:** Trigger a `NEEDS_CONSENT` result, simulate user approval, verify the tool is then auto-approved for the rest of the session.
+5. **SafetyManager delegation:** Verify that `ToolPermissionManager` correctly delegates risk assessment to `SafetyManager.is_blocked()` and `SafetyManager.requires_consent()`.
+6. **Dangerous command blocking:** Verify that `SafetyManager.BLOCKED_PATTERNS` patterns (e.g., `rm -rf /`) are caught and blocked before tool execution.
+
 ---
 
 ### New Files to Create
@@ -2936,6 +3056,7 @@ Update `agent_loop.py` to incorporate all Phase 16 capabilities:
 | `src/proxima/agent/dynamic_tools/tools/todos_tool.py` | 16 | Structured todo/task tracking tool |
 | `tests/test_session_manager.py` | 15 | Session persistence, import, summarization tests |
 | `tests/test_tool_permissions.py` | 16 | Permission system tests (allowlist, blocklist, consent flow) |
+| `src/proxima/agent/dual_model_router.py` | 16 | DualModelRouter wrapping LLMRouter for large/small model selection |
 
 ### Existing Files to Modify
 
@@ -2950,8 +3071,8 @@ Update `agent_loop.py` to incorporate all Phase 16 capabilities:
 | `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` | 4 | No changes to tool implementations (already complete) |
 | `src/proxima/agent/dynamic_tools/tools/git_tools.py` | 8 | No changes to tool implementations (already complete) |
 | `src/proxima/agent/dynamic_tools/tools/terminal_tools.py` | 4 | No changes to tool implementations (already complete) |
-| `src/proxima/agent/dynamic_tools/agent_loop.py` | 10, 15, 16 | Accept AgentSessionManager, SubAgent factory, ToolPermissionManager, DualModelRouter; add auto-summarization checks, permission checks, sub-agent spawning, todos integration |
-| `src/proxima/agent/dynamic_tools/llm_integration.py` | 16 | Add ModelRole enum, DualModelRouter class for large/small model selection |
+| `src/proxima/agent/dynamic_tools/agent_loop.py` | 15, 16 | (Created in Phase 10 as a New File.) Accept AgentSessionManager, SubAgent factory, ToolPermissionManager, DualModelRouter; add auto-summarization checks, permission checks, sub-agent spawning, todos integration |
+| `src/proxima/agent/dynamic_tools/llm_integration.py` | — | No changes needed (DualModelRouter and ModelRole are in separate `dual_model_router.py`) |
 | `src/proxima/agent/backend_builder.py` | 6 | Called by IntentToolBridge for BACKEND_BUILD; uses BuildProfileLoader to load YAML profiles and execute build steps |
 | `src/proxima/agent/backend_modifier.py` | 6 | Called by IntentToolBridge for BACKEND_MODIFY; generates CodeChange objects, applies modifications with diff preview |
 | `src/proxima/agent/checkpoint_manager.py` | 6 | Used by BACKEND_MODIFY handler for checkpoint creation, undo, redo, and rollback |
@@ -3015,7 +3136,7 @@ Phase 12 (Complex Task Walkthrough)         ← Core functionality 9 — Validat
     ↓
 Phase 13 (Testing)                          ← Comprehensive test suite
     ↓
-Phase 14 (Final Integration)               ← Production readiness
+Phase 14 (Core Integration)               ← Wiring all components together
     ↓
 Phase 15 (Session Context Handling)         ← Core functionality 10 — persistence, import, auto-summarization
     ↓
@@ -3037,7 +3158,7 @@ Phase 16 (Crush-Inspired Capabilities)      ← Core functionality 11 — sub-ag
 - Phase 3 must complete before Phases 4-8 (IntentToolBridge is the execution backbone)
 - Phase 6 should follow Phase 5 (backend builds use dependency management)
 - Phase 10 must come after Phases 3-9 (integrates all components)
-- Phase 14 must complete before Phase 15 (final wiring must be stable before session persistence layer)
+- Phase 14 must complete before Phase 15 (core wiring must be stable before session persistence layer)
 - Phase 15 must substantially complete before Phase 16 (AgentSessionManager needed for sub-agent TaskSessions, dual-model routing)
 - Phase 16 is the final phase — strict compliance validation (functionality 12) should be verified across all 16 phases at the end
 
