@@ -28,45 +28,45 @@ The assistant's architecture remains stable. The integrated model operates dynam
 ### Existing Files and Their Roles
 
 **Intent Recognition Layer:**
-- `src/proxima/agent/dynamic_tools/robust_nl_processor.py` (1,417 lines): Hybrid rule-based + context-aware natural language processor. Contains `IntentType` enum with 27 intent types, `ExtractedEntity` dataclass, `Intent` dataclass, `SessionContext` for cross-message state tracking, and `RobustNLProcessor` class with pattern-based entity extraction. Currently handles: navigate, list directory, git checkout/clone/pull/status, file create/read/write/delete/copy/move, run command/script, and query operations.
-- `src/proxima/agent/dynamic_tools/intent_classifier.py` (631 lines): LLM-reasoning-based intent classifier. Contains a **separate** `IntentType` enum (conflicting with the one in `robust_nl_processor.py`), `ClassifiedIntent` dataclass, and `IntentClassifier` class that uses LLM reasoning instead of keyword matching. Intent types here are broader categories: `FILE_OPERATION`, `DIRECTORY_OPERATION`, `GIT_OPERATION`, `TERMINAL_OPERATION`, `SEARCH_OPERATION`, `ANALYSIS_OPERATION`, `CONFIGURATION`, `INFORMATION_QUERY`, `CONVERSATION`, `MULTI_STEP`, `UNKNOWN`.
+- `src/proxima/agent/dynamic_tools/robust_nl_processor.py` (1,416 lines): Hybrid rule-based + context-aware natural language processor. Contains `IntentType` enum with 27 intent types, `ExtractedEntity` dataclass, `Intent` dataclass, `SessionContext` for cross-message state tracking, and `RobustNLProcessor` class with pattern-based entity extraction. Currently handles: navigate, list directory, git checkout/clone/pull/status, file create/read/write/delete/copy/move, run command/script, and query operations.
+- `src/proxima/agent/dynamic_tools/intent_classifier.py` (630 lines): LLM-reasoning-based intent classifier. Contains a **separate** `IntentType` enum (conflicting with the one in `robust_nl_processor.py`), `ClassifiedIntent` dataclass, and `IntentClassifier` class that uses LLM reasoning instead of keyword matching. Intent types here are broader categories: `FILE_OPERATION`, `DIRECTORY_OPERATION`, `GIT_OPERATION`, `TERMINAL_OPERATION`, `SEARCH_OPERATION`, `ANALYSIS_OPERATION`, `CONFIGURATION`, `INFORMATION_QUERY`, `CONVERSATION`, `MULTI_STEP`, `UNKNOWN`.
 
 **Tool System Layer:**
-- `src/proxima/agent/dynamic_tools/tool_interface.py` (985 lines): Abstract base classes and contracts. Defines `ToolInterface`, `BaseTool` (abstract subclass providing standard property-based metadata), `ToolDefinition`, `ToolParameter`, `ToolResult`, `ToolCategory` (29 members: 7 top-level — FILE_SYSTEM, GIT, GITHUB, TERMINAL, BACKEND, ANALYSIS, SYSTEM — plus 22 sub-categories like FILE_READ, FILE_WRITE, GIT_BRANCH, etc.), `PermissionLevel` (READ_ONLY, READ_WRITE, EXECUTE, SYSTEM, NETWORK, ADMIN, FULL_ADMIN), `RiskLevel` (NONE, LOW, MEDIUM, HIGH, CRITICAL), `ExecutionStatus`, `ParameterType` (11 values including STRING, PATH, URL, BRANCH_NAME). Uses Pydantic for validation.
-- `src/proxima/agent/dynamic_tools/tool_registry.py` (668 lines): Central registry for dynamic tool discovery. Provides `ToolRegistry` singleton with `RegisteredTool` tracking, semantic search via `ToolSearchResult`, and `@register_tool` decorator for auto-registration. Tracks usage counts and success rates.
-- `src/proxima/agent/dynamic_tools/tool_orchestrator.py` (670 lines): Multi-tool execution coordinator. Contains `ExecutionStep`, `ExecutionPlan`, `ExecutionStepStatus`, `ExecutionPlanStatus` dataclasses. Supports dependency resolution, parallel execution via `ThreadPoolExecutor`, and error handling with retry logic.
-- `src/proxima/agent/dynamic_tools/execution_context.py` (515 lines): State carrier across tool executions. Contains `GitState`, `TerminalSession`, `FileSystemState` dataclasses. Supports snapshots for rollback capability and serialization for persistence.
-- `src/proxima/agent/dynamic_tools/llm_integration.py` (657 lines): Provider-agnostic LLM bridge. Supports OpenAI, Anthropic, Google, Ollama, Azure, Cohere, and Generic via `LLMProvider` enum (7 values). Contains `ToolCall` and `ToolCallResult` dataclasses, `LLMToolConfig`, and `LLMToolIntegration` class. Parses tool calls from various LLM response formats.
+- `src/proxima/agent/dynamic_tools/tool_interface.py` (984 lines): Abstract base classes and contracts. Defines `ToolInterface`, `BaseTool` (abstract subclass providing standard property-based metadata), `ToolDefinition`, `ToolParameter`, `ToolResult`, `ToolCategory` (29 members: 7 top-level — FILE_SYSTEM, GIT, GITHUB, TERMINAL, BACKEND, ANALYSIS, SYSTEM — plus 22 sub-categories like FILE_READ, FILE_WRITE, GIT_BRANCH, etc.), `PermissionLevel` (READ_ONLY, READ_WRITE, EXECUTE, SYSTEM, NETWORK, ADMIN, FULL_ADMIN), `RiskLevel` (NONE, LOW, MEDIUM, HIGH, CRITICAL), `ExecutionStatus`, `ParameterType` (11 values including STRING, PATH, URL, BRANCH_NAME). Uses Pydantic for validation.
+- `src/proxima/agent/dynamic_tools/tool_registry.py` (667 lines): Central registry for dynamic tool discovery. Provides `ToolRegistry` singleton with `RegisteredTool` tracking, semantic search via `ToolSearchResult`, and `@register_tool` decorator for auto-registration. Tracks usage counts and success rates.
+- `src/proxima/agent/dynamic_tools/tool_orchestrator.py` (669 lines): Multi-tool execution coordinator. Contains `ExecutionStep`, `ExecutionPlan`, `ExecutionStepStatus`, `ExecutionPlanStatus` dataclasses. Supports dependency resolution, parallel execution via `ThreadPoolExecutor`, and error handling with retry logic.
+- `src/proxima/agent/dynamic_tools/execution_context.py` (514 lines): State carrier across tool executions. Contains `GitState`, `TerminalSession`, `FileSystemState` dataclasses. Supports snapshots for rollback capability and serialization for persistence.
+- `src/proxima/agent/dynamic_tools/llm_integration.py` (656 lines): Provider-agnostic LLM bridge. Supports OpenAI, Anthropic, Google, Ollama, Azure, Cohere, and Generic via `LLMProvider` enum (7 values). Contains `ToolCall` and `ToolCallResult` dataclasses, `LLMToolConfig`, and `LLMToolIntegration` class. Parses tool calls from various LLM response formats. **Note:** This `LLMProvider` enum is a local enum for tool integration config, separate from the 18+ provider classes in `src/proxima/intelligence/llm_router.py` which handles actual API communication with OpenAI, Anthropic, Ollama, LMStudio, LlamaCpp, Together, Groq, Mistral, Azure, Cohere, Perplexity, GoogleGemini, XAI, DeepSeek, Fireworks, HuggingFace, Replicate, and OpenRouter.
 
 **Tool Implementations:**
-- `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` (910 lines): `ReadFileTool`, `WriteFileTool`, `ListDirectoryTool`, `SearchFilesTool`, `DeleteFileTool`, `MoveFileTool`, `FileInfoTool`. All registered via `@register_tool` decorator. **Note:** `CreateDirectoryTool` does NOT currently exist — directory creation must go through `RunCommandTool` with `mkdir`, or a new tool must be created.
-- `src/proxima/agent/dynamic_tools/tools/git_tools.py` (850 lines): `GitStatusTool`, `GitCommitTool`, `GitBranchTool`, `GitLogTool`, `GitDiffTool`, `GitAddTool`. Uses `subprocess` for git command execution with 30-second timeouts. Note: there is no `GitCheckoutTool` or `GitStashTool` — checkout is handled via `GitBranchTool` (action="switch"), and stash goes through `RunCommandTool`.
-- `src/proxima/agent/dynamic_tools/tools/terminal_tools.py` (465 lines): `RunCommandTool`, `GetWorkingDirectoryTool`, `ChangeDirectoryTool`, `EnvironmentVariableTool`. Uses PowerShell on Windows, user's shell on Unix. Has `get_shell_info()` for cross-platform shell detection.
+- `src/proxima/agent/dynamic_tools/tools/filesystem_tools.py` (909 lines): `ReadFileTool`, `WriteFileTool`, `ListDirectoryTool`, `SearchFilesTool`, `DeleteFileTool`, `MoveFileTool`, `FileInfoTool`. All registered via `@register_tool` decorator. **Note:** `CreateDirectoryTool` does NOT currently exist — directory creation must go through `RunCommandTool` with `mkdir`, or a new tool must be created.
+- `src/proxima/agent/dynamic_tools/tools/git_tools.py` (849 lines): `GitStatusTool`, `GitCommitTool`, `GitBranchTool`, `GitLogTool`, `GitDiffTool`, `GitAddTool`. Uses `subprocess` for git command execution with 30-second timeouts. Note: there is no `GitCheckoutTool` or `GitStashTool` — checkout is handled via `GitBranchTool` (action="switch"), and stash goes through `RunCommandTool`.
+- `src/proxima/agent/dynamic_tools/tools/terminal_tools.py` (464 lines): `RunCommandTool`, `GetWorkingDirectoryTool`, `ChangeDirectoryTool`, `EnvironmentVariableTool`. Uses PowerShell on Windows, user's shell on Unix. Has `get_shell_info()` for cross-platform shell detection.
 
 **Agent Infrastructure:**
-- `src/proxima/agent/task_planner.py` (1,098 lines): LLM-based plan generation from natural language. Contains `TaskCategory` enum (BUILD, ANALYZE, MODIFY, EXECUTE, QUERY, GIT, FILE, SYSTEM, UNKNOWN — 9 values), `StepStatus` enum (PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, CANCELLED), `PlanStatus` enum (DRAFT, VALIDATED, EXECUTING, COMPLETED, FAILED, PAUSED, CANCELLED), `PlanStep` dataclass with dependency tracking, `ExecutionPlan` dataclass with status tracking, `IntentRecognitionResult` dataclass, and validation/feasibility checking.
-- `src/proxima/agent/plan_executor.py` (662 lines): Dependency-ordered execution engine. Supports sequential and parallel modes via `ExecutionMode` enum, plus dry-run mode. Contains `StepResult` and `ExecutionResult` dataclasses with duration tracking.
-- `src/proxima/agent/script_executor.py` (759 lines): Multi-language script execution. Supports Python, Bash, PowerShell, JavaScript, Lua, Shell, and Unknown via `ScriptLanguage` enum (7 values). Also has `ScriptSource` enum (FILE, INLINE, STDIN). Auto-detects language from extension and shebang. Contains `ScriptInfo`, `InterpreterInfo`, and `ScriptResult` dataclasses. Has `InterpreterRegistry` class for interpreter discovery and `ScriptExecutor` class.
-- `src/proxima/agent/safety.py` (878 lines): Consent and safety system. Defines `ConsentType` (COMMAND_EXECUTION, FILE_MODIFICATION, GIT_OPERATION, ADMIN_ACCESS, NETWORK_ACCESS, BACKEND_MODIFICATION, SYSTEM_CHANGE, BULK_OPERATION), `ConsentDecision` (APPROVED, DENIED, APPROVED_ONCE, APPROVED_SESSION, APPROVED_ALWAYS), `ConsentRequest` dataclass with risk levels (low/medium/high/critical), `ConsentResponse` dataclass, `OperationCheckpoint` dataclass. Also contains `RollbackManager` (checkpoint creation, undo, redo, rollback) and `SafetyManager` (consent workflow, blocked command detection via `is_blocked()`, safe operation checking via `is_safe_operation()`, consent requirement checking via `requires_consent()`, audit logging, session-scoped approvals, and built-in `BLOCKED_PATTERNS` and `SAFE_OPERATIONS` lists).
-- `src/proxima/agent/admin_privilege_handler.py` (727 lines): Privilege detection and elevation. Contains `PrivilegeLevel` (STANDARD, ELEVATED, SYSTEM, UNKNOWN — 4 values), `ElevationMethod` (UAC, SUDO, PKEXEC, RUNAS, NONE — 5 values), `OperationCategory` (FILE_SYSTEM, PACKAGE_INSTALL, SERVICE_CONTROL, NETWORK, REGISTRY, PERMISSION, SYSTEM_CONFIG), `PrivilegeInfo` dataclass (with `level`, `is_admin`, `username`, `user_id`, `groups`, `elevation_available`, `elevation_method`, `platform`), `PrivilegedOperation` dataclass, `ElevationResult` dataclass.
-- `src/proxima/agent/checkpoint_manager.py` (762 lines): Undo/redo/rollback system. Contains `FileState` (tracks file content and checksums), `Checkpoint` dataclass (with checkpoint ID, timestamp, operation, file states, metadata, rollback status).
-- `src/proxima/agent/backend_modifier.py` (801 lines): Safe code modification for quantum backends. Contains `ModificationType` (REPLACE, INSERT, DELETE, APPEND, PREPEND), `CodeChange` dataclass with diff generation, `ModificationResult` dataclass. Creates checkpoints via `RollbackManager` before every modification.
-- `src/proxima/agent/modification_preview.py` (653 lines): Diff visualization system. Contains `ModificationScope`, `DiffLineType`, `DiffLine`, `DiffHunk` dataclasses. Supports side-by-side diff display with syntax highlighting.
-- `src/proxima/agent/backend_builder.py` (1,147 lines): Backend build pipeline. Contains `BuildStatus` enum (PENDING, VALIDATING, INSTALLING_DEPS, BUILDING, TESTING, VERIFYING, COMPLETED, FAILED, CANCELLED), `DependencyCheck` dataclass, `ValidationResult` dataclass, `BuildStepResult` dataclass, `BuildResult` dataclass, `BuildProfileLoader` (loads from `configs/backend_build_profiles.yaml`), `BackendBuilder` class with async build method, GPU detection integration, progress callbacks, and validation. **Note:** `BuildArtifactManager` is imported from a separate module `src/proxima/agent/build_artifact_manager.py`, NOT defined in this file.
-- `src/proxima/agent/multi_terminal.py` (1,626 lines): Multi-terminal session management. Contains `TerminalState` enum (PENDING, STARTING, RUNNING, COMPLETED, FAILED, TIMEOUT, CANCELLED), `TerminalEventType`, `TerminalEvent`, circular output buffer (10,000 lines), `SessionManager` for 10 concurrent sessions, cross-platform command normalization, event-based state notifications.
-- `src/proxima/agent/dynamic_tools/deployment_monitoring.py` (3,000 lines): Deployment and dependency monitoring. Contains `DependencyManager` class (line 1004) focused on vulnerability scanning, license compliance checking, dependency pinning, and update strategy management. Note: this is a different concern from the `ProjectDependencyManager` created in Phase 5 — the existing `DependencyManager` handles security/compliance auditing, while `ProjectDependencyManager` handles project dependency detection, installation, and error-driven auto-fix.
-- `src/proxima/agent/dynamic_tools/error_detection.py` (1,264 lines): Error classification and analysis. Contains `ErrorSeverity` enum (6 values: DEBUG, INFO, WARNING, ERROR, CRITICAL, FATAL), `ErrorCategory` enum (20 values: FILESYSTEM, NETWORK, AUTHENTICATION, PERMISSION, RESOURCE, TIMEOUT, VALIDATION, CONFIGURATION, DEPENDENCY, GIT, GITHUB, TERMINAL, BUILD, RUNTIME, MEMORY, DISK, SYNTAX, LOGIC, CONCURRENCY, UNKNOWN), `ErrorState` enum (8 values), `ErrorContext`, `ErrorPattern`, `AnalyzedError` dataclasses, and `ErrorClassifier` class with `classify(error: Exception, context: Optional[ErrorContext])` and `classify_with_llm()` (async) methods.
+- `src/proxima/agent/task_planner.py` (1,097 lines): LLM-based plan generation from natural language. Contains `TaskCategory` enum (BUILD, ANALYZE, MODIFY, EXECUTE, QUERY, GIT, FILE, SYSTEM, UNKNOWN — 9 values), `StepStatus` enum (PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, CANCELLED), `PlanStatus` enum (DRAFT, VALIDATED, EXECUTING, COMPLETED, FAILED, PAUSED, CANCELLED), `PlanStep` dataclass with dependency tracking, `ExecutionPlan` dataclass with status tracking, `IntentRecognitionResult` dataclass, and validation/feasibility checking.
+- `src/proxima/agent/plan_executor.py` (661 lines): Dependency-ordered execution engine. Supports sequential and parallel modes via `ExecutionMode` enum, plus dry-run mode. Contains `StepResult` and `ExecutionResult` dataclasses with duration tracking.
+- `src/proxima/agent/script_executor.py` (758 lines): Multi-language script execution. Supports Python, Bash, PowerShell, JavaScript, Lua, Shell, and Unknown via `ScriptLanguage` enum (7 values). Also has `ScriptSource` enum (FILE, INLINE, STDIN). Auto-detects language from extension and shebang. Contains `ScriptInfo`, `InterpreterInfo`, and `ScriptResult` dataclasses. Has `InterpreterRegistry` class for interpreter discovery and `ScriptExecutor` class.
+- `src/proxima/agent/safety.py` (877 lines): Consent and safety system. Defines `ConsentType` (COMMAND_EXECUTION, FILE_MODIFICATION, GIT_OPERATION, ADMIN_ACCESS, NETWORK_ACCESS, BACKEND_MODIFICATION, SYSTEM_CHANGE, BULK_OPERATION), `ConsentDecision` (APPROVED, DENIED, APPROVED_ONCE, APPROVED_SESSION, APPROVED_ALWAYS), `ConsentRequest` dataclass with risk levels (low/medium/high/critical), `ConsentResponse` dataclass, `OperationCheckpoint` dataclass. Also contains `RollbackManager` (checkpoint creation, undo, redo, rollback) and `SafetyManager` (consent workflow, blocked command detection via `is_blocked()`, safe operation checking via `is_safe_operation()`, consent requirement checking via `requires_consent()`, audit logging, session-scoped approvals, and built-in `BLOCKED_PATTERNS` and `SAFE_OPERATIONS` lists).
+- `src/proxima/agent/admin_privilege_handler.py` (726 lines): Privilege detection and elevation. Contains `PrivilegeLevel` (STANDARD, ELEVATED, SYSTEM, UNKNOWN — 4 values), `ElevationMethod` (UAC, SUDO, PKEXEC, RUNAS, NONE — 5 values), `OperationCategory` (FILE_SYSTEM, PACKAGE_INSTALL, SERVICE_CONTROL, NETWORK, REGISTRY, PERMISSION, SYSTEM_CONFIG), `PrivilegeInfo` dataclass (with `level`, `is_admin`, `username`, `user_id`, `groups`, `elevation_available`, `elevation_method`, `platform`), `PrivilegedOperation` dataclass, `ElevationResult` dataclass.
+- `src/proxima/agent/checkpoint_manager.py` (761 lines): Undo/redo/rollback system. Contains `FileState` (tracks file content and checksums), `Checkpoint` dataclass (with checkpoint ID, timestamp, operation, file states, metadata, rollback status).
+- `src/proxima/agent/backend_modifier.py` (800 lines): Safe code modification for quantum backends. Contains `ModificationType` (REPLACE, INSERT, DELETE, APPEND, PREPEND), `CodeChange` dataclass (at line 46) with `get_diff()` method (at line 76, uses `difflib.unified_diff`), `ModificationResult` dataclass. Creates checkpoints via `RollbackManager` before every modification.
+- `src/proxima/agent/modification_preview.py` (652 lines): Diff visualization system. Contains `ModificationScope`, `DiffLineType`, `DiffLine`, `DiffHunk`, `ModificationPreview` dataclasses, and `ModificationPreviewGenerator` class. Supports side-by-side diff display with syntax highlighting. Also has a standalone `generate_preview()` convenience function at line 640.
+- `src/proxima/agent/backend_builder.py` (1,146 lines): Backend build pipeline. Contains `BuildStatus` enum (PENDING, VALIDATING, INSTALLING_DEPS, BUILDING, TESTING, VERIFYING, COMPLETED, FAILED, CANCELLED), `DependencyCheck` dataclass, `ValidationResult` dataclass, `BuildStepResult` dataclass, `BuildResult` dataclass, `BuildProfileLoader` (loads from `configs/backend_build_profiles.yaml`), `BackendBuilder` class with async build method, GPU detection integration, progress callbacks, and validation. **Note:** `BuildArtifactManager` is imported from a separate module `src/proxima/agent/build_artifact_manager.py`, NOT defined in this file.
+- `src/proxima/agent/multi_terminal.py` (1,625 lines): Multi-terminal session management. Contains `TerminalState` enum (PENDING, STARTING, RUNNING, COMPLETED, FAILED, TIMEOUT, CANCELLED), `TerminalEventType`, `TerminalEvent`, circular output buffer (10,000 lines), `SessionManager` for 10 concurrent sessions, cross-platform command normalization, event-based state notifications.
+- `src/proxima/agent/dynamic_tools/deployment_monitoring.py` (2,999 lines): Deployment and dependency monitoring. Contains `DependencyManager` class (line 1004) focused on vulnerability scanning, license compliance checking, dependency pinning, and update strategy management. Note: this is a different concern from the `ProjectDependencyManager` created in Phase 5 — the existing `DependencyManager` handles security/compliance auditing, while `ProjectDependencyManager` handles project dependency detection, installation, and error-driven auto-fix.
+- `src/proxima/agent/dynamic_tools/error_detection.py` (1,263 lines): Error classification and analysis. Contains `ErrorSeverity` enum (6 values: DEBUG, INFO, WARNING, ERROR, CRITICAL, FATAL), `ErrorCategory` enum (20 values: FILESYSTEM, NETWORK, AUTHENTICATION, PERMISSION, RESOURCE, TIMEOUT, VALIDATION, CONFIGURATION, DEPENDENCY, GIT, GITHUB, TERMINAL, BUILD, RUNTIME, MEMORY, DISK, SYNTAX, LOGIC, CONCURRENCY, UNKNOWN), `ErrorState` enum (8 values), `ErrorContext`, `ErrorPattern`, `AnalyzedError` dataclasses, and `ErrorClassifier` class with `classify(error: Exception, context: Optional[ErrorContext])` and `classify_with_llm()` (async) methods.
 - `src/proxima/agent/terminal_state_machine.py`: Terminal lifecycle state machine for managing terminal process states. Contains `TerminalProcessState` enum (PENDING, STARTING, RUNNING, PAUSED, COMPLETED, FAILED, TIMEOUT, CANCELLED) and `TerminalStateMachine` class. **Note:** This file is in `src/proxima/agent/`, NOT in `src/proxima/agent/dynamic_tools/`.
-- `src/proxima/agent/dynamic_tools/entity_extractor.py` (814 lines): LLM-based entity extraction system (separate from the regex-based extraction in `robust_nl_processor.py`). Contains `EntityType` enum (FILE_PATH, DIRECTORY_PATH, GIT_BRANCH, GIT_COMMIT, etc.) and `EntityExtractor` class. Uses LLM reasoning and context-aware inference instead of hardcoded regex patterns. **Note:** This module's `ExtractedEntity` is different from the one in `robust_nl_processor.py` — avoid name collision when importing both.
+- `src/proxima/agent/dynamic_tools/entity_extractor.py` (813 lines): LLM-based entity extraction system (separate from the regex-based extraction in `robust_nl_processor.py`). Contains `EntityType` enum (FILE_PATH, DIRECTORY_PATH, GIT_BRANCH, GIT_COMMIT, etc.) and `EntityExtractor` class. Uses LLM reasoning and context-aware inference instead of hardcoded regex patterns. **Note:** This module's `ExtractedEntity` is different from the one in `robust_nl_processor.py` — avoid name collision when importing both.
 
 **TUI Layer:**
-- `src/proxima/tui/screens/agent_ai_assistant.py` (7,747 lines): Main AI assistant screen. Contains 5-phase response pipeline in `_generate_response()`: Phase 0 (`_try_direct_backend_operation`) for pattern-matched backend/clone/build requests; Phase 1 (`_try_robust_nl_execution`) using `RobustNLProcessor`; Phase 2 (`_analyze_and_execute_with_llm`) for LLM-based intent extraction; Phase 3 (`_try_execute_agent_command`) for keyword-based agent commands; Phase 4 (`_generate_llm_response`) for general chat. Contains ~130 methods covering all operations.
-- `src/proxima/tui/screens/execution.py` (1,879 lines): Execution monitoring screen with progress bars, stage timeline, log viewer, and AI thinking panel. Accessible via key **2**.
-- `src/proxima/tui/screens/results.py` (734 lines): Results browser with probability visualization and export engine. Accessible via key **3**.
+- `src/proxima/tui/screens/agent_ai_assistant.py` (7,746 lines): Main AI assistant screen. Contains 5-phase response pipeline in `_generate_response()`: Phase 0 (`_try_direct_backend_operation`) for pattern-matched backend/clone/build requests; Phase 1 (`_try_robust_nl_execution`) using `RobustNLProcessor`; Phase 2 (`_analyze_and_execute_with_llm`) for LLM-based intent extraction; Phase 3 (`_try_execute_agent_command`) for keyword-based agent commands; Phase 4 (`_generate_llm_response`) for general chat. Contains ~145 methods covering all operations.
+- `src/proxima/tui/screens/execution.py` (1,913 lines): Execution monitoring screen with progress bars, stage timeline, log viewer, and AI thinking panel. Accessible via key **2**.
+- `src/proxima/tui/screens/results.py` (761 lines): Results browser with probability visualization and export engine. Accessible via key **3**.
 - `src/proxima/tui/widgets/agent_widgets.py`: Enhanced UI widgets including `MultiTerminalView`.
 
 **Configuration:**
-- `configs/backend_build_profiles.yaml` (497 lines): Build profiles for 9 backends (lret_cirq_scalability, lret_pennylane_hybrid, lret_phase_7_unified, cirq, qiskit, quest, qsim, cuquantum, qsim_cuda). Each profile contains: name, description, directory, platform, gpu_required, dependencies (python_version, packages, system_packages), build_steps (ordered commands with timeouts), verification (test_import, test_command, expected_files), and error_patterns.
+- `configs/backend_build_profiles.yaml` (496 lines): Build profiles for 9 simulator backends (lret_cirq_scalability, lret_pennylane_hybrid, lret_phase_7_unified, cirq, qiskit, quest, qsim, cuquantum, qsim_cuda) plus 5 build preset profiles (minimal, standard, full, gpu, lret_all). Each backend profile contains: name, description, directory, platform, gpu_required, dependencies (python_version, packages, system_packages), build_steps (ordered commands with timeouts), verification (test_import, test_command, expected_files), and error_patterns.
 
 ### Known Gaps in Current System
 1. **Two conflicting IntentType enums** — `robust_nl_processor.py` and `intent_classifier.py` each define their own `IntentType` enum with different values and semantics.
@@ -256,7 +256,7 @@ Open the file `src/proxima/agent/dynamic_tools/robust_nl_processor.py`. Locate t
 **Web and research intents (for Functionality 11):**
 - `WEB_SEARCH` — user wants to search the web or fetch content from a URL
 
-Keep all existing 27 entries unchanged. Only append the new entries. The total enum should have approximately 56 members.
+Keep all existing 27 entries unchanged. Only append the new entries. The total enum should have 54 members (27 existing + 27 new).
 
 ### Step 1.2: Deprecate the IntentType Enum in intent_classifier.py
 
@@ -279,13 +279,15 @@ Search the entire codebase for any file that imports `IntentType` from `intent_c
 - Import `IntentCategory` (if they use the broad categories), or
 - Import `IntentType` from `robust_nl_processor` (if they need specific intents)
 
-Files likely affected:
-- `src/proxima/agent/dynamic_tools/__init__.py`
-- `src/proxima/agent/dynamic_tools/llm_integration.py`
-- `src/proxima/agent/dynamic_tools/tool_orchestrator.py`
-- `src/proxima/tui/screens/agent_ai_assistant.py`
+Files confirmed affected:
+- `src/proxima/agent/dynamic_tools/__init__.py` — **CRITICAL**: This file imports `IntentType` from BOTH `intent_classifier` (line 135) and `robust_nl_processor` (line 638), causing a silent shadowing issue where the `robust_nl_processor` import overwrites the `intent_classifier` one. After renaming, import `IntentCategory` from `intent_classifier` and `IntentType` from `robust_nl_processor`. Export both under their distinct names.
 
-Run a workspace-wide search for `from .intent_classifier import IntentType` and `from ..dynamic_tools.intent_classifier import IntentType` to find all affected files.
+Files NOT affected (verified — they do NOT import `IntentType` from `intent_classifier`):
+- `src/proxima/agent/dynamic_tools/llm_integration.py` — does not reference `IntentType`
+- `src/proxima/agent/dynamic_tools/tool_orchestrator.py` — does not reference `IntentType`
+- `src/proxima/tui/screens/agent_ai_assistant.py` — imports `IntentType` from `robust_nl_processor` (not from `intent_classifier`)
+
+Run a workspace-wide search for `from .intent_classifier import IntentType` and `from ..dynamic_tools.intent_classifier import IntentType` to confirm no other files are affected.
 
 ### Step 1.4: Expand Keyword Mappings for New Intents
 
@@ -590,6 +592,7 @@ The `IntentToolBridge` class must contain:
 
 **A static mapping dictionary `INTENT_TO_TOOL`** that maps each `IntentType` to a tool name string. For example:
 - `IntentType.CREATE_FILE` → `"write_file"`
+- `IntentType.WRITE_FILE` → `"write_file"`
 - `IntentType.READ_FILE` → `"read_file"`
 - `IntentType.LIST_DIRECTORY` → `"list_directory"`
 - `IntentType.NAVIGATE_DIRECTORY` → `"change_directory"`
@@ -604,6 +607,7 @@ The `IntentToolBridge` class must contain:
 - `IntentType.GIT_BRANCH` → `"git_branch"` (from `git_tools.py`)
 - `IntentType.GIT_LOG` → `"git_log"` (from `git_tools.py`)
 - `IntentType.GIT_DIFF` → `"git_diff"` (from `git_tools.py`)
+- `IntentType.GIT_ADD` → `"git_add"` (from `git_tools.py`'s `GitAddTool`)
 - `IntentType.GIT_STASH` → `"run_command"` (with `git stash` as the command — no dedicated stash tool exists)
 - `IntentType.INSTALL_DEPENDENCY` → `"run_command"` (with pip/npm/conda command)
 - `IntentType.SEARCH_FILE` → `"search_files"` (from `filesystem_tools.py`)
@@ -1032,8 +1036,8 @@ Before applying the change, show a diff preview using `ModificationPreviewGenera
    - `modification_type`: one of `ModificationType.REPLACE`, `INSERT`, `DELETE`, `APPEND`, `PREPEND`
    - `old_content`: the current content (or specific lines)
    - `new_content`: the proposed replacement
-2. Generate a diff via `CodeChange.get_diff()` (defined at line 75 of `backend_modifier.py`, uses `difflib.unified_diff`) — this produces a unified diff string
-3. Use `ModificationPreviewGenerator.generate_preview()` (defined at line 258 of `modification_preview.py`, signature: `generate_preview(self, file_path, old_content, new_content, modification_type="modify", description="") -> ModificationPreview`) to generate and format the diff with Rich syntax highlighting:
+2. Generate a diff via `CodeChange.get_diff()` (method at line 76 of `backend_modifier.py`, on the `CodeChange` dataclass defined at line 46, uses `difflib.unified_diff`) — this produces a unified diff string
+3. Use `ModificationPreviewGenerator.generate_preview()` (defined at line 262 of `modification_preview.py`, signature: `generate_preview(self, file_path, old_content, new_content, modification_type="modify", description="") -> ModificationPreview`) to generate and format the diff with Rich syntax highlighting:
    - Green for additions, red for deletions, gray for context lines
    - Line numbers on both sides
 4. Display the formatted diff in the chat:
@@ -1711,8 +1715,9 @@ This refactoring eliminates the need for the current Phase 0 (`_try_direct_backe
 If the integrated LLM supports streaming (Ollama and most API providers do), enable token-by-token display:
 
 1. In `AgentLoop`, when the LLM is called in the multi-turn loop:
-   - Check if the provider actually implements streaming: `stream_send()` is defined as an abstract method on the base `LLMProvider` class in `llm_router.py` (line 132), so `hasattr(provider, 'stream_send')` will **always** return `True`. Instead, check whether the provider's `stream_send` is actually overridden (not the base stub). Use this pattern: `provider_instance = self._llm_router._pick_provider(request)` and check if the provider class has a concrete `stream_send` implementation. Alternatively, maintain a list of known streaming-capable provider names: `STREAMING_PROVIDERS = {'ollama', 'openai', 'anthropic', 'google_gemini', 'deepseek', 'groq', 'mistral', 'together', 'cohere', 'xai', 'huggingface', 'lm_studio'}`.
-   - **Note:** `stream_send()` exists on individual provider subclasses (e.g., `OllamaProvider.stream_send`, `OpenAIProvider.stream_send`), NOT on `LLMRouter` itself. The `LLMRouter` only has `route()` and `route_with_fallback()`. To stream, you must get the provider instance directly: `provider = self._llm_router._pick_provider(request)`, then call `provider.stream_send(request, api_key, callback)`.
+   - Check if the provider actually implements streaming: `stream_send()` is defined as a method on the base `_BaseProvider` class in `llm_router.py` (line 213), and `LLMProvider` Protocol (line 132) declares it. Since `hasattr(provider, 'stream_send')` will **always** return `True` (all providers inherit from `_BaseProvider`), check whether the provider's class actually overrides `stream_send` — use this pattern: `provider_instance = self._llm_router._pick_provider(request)` and check `type(provider_instance).stream_send is not _BaseProvider.stream_send`. Alternatively, maintain a list of known streaming-capable provider names (verified from `llm_router.py` source — only providers that override `stream_send`): `STREAMING_PROVIDERS = {'ollama', 'openai', 'anthropic', 'google_gemini', 'deepseek', 'groq', 'cohere', 'xai', 'lm_studio', 'openrouter'}`.
+   - **Note:** `mistral`, `together`, and `huggingface` providers exist in `llm_router.py` but do NOT override `stream_send` — they use the base stub which falls back to non-streaming. Do not include them in `STREAMING_PROVIDERS`.
+   - **Note:** `stream_send()` exists on individual provider subclasses (e.g., `OllamaProvider.stream_send`, `OpenAIProvider.stream_send`, `OpenRouterProvider.stream_send`), NOT on `LLMRouter` itself. The `LLMRouter` only has `route()` and `route_with_fallback()`. To stream, you must get the provider instance directly: `provider = self._llm_router._pick_provider(request)`, then call `provider.stream_send(request, api_key, callback)`.
    - Create a generator that yields tokens via the `callback` parameter of `stream_send(request, api_key, callback)` — the callback receives each token string
    - Pass tokens to the UI callback incrementally
 
@@ -1765,7 +1770,7 @@ Ensure every operation has proper error handling, meaningful error messages, rec
 
 Add a new file `src/proxima/agent/agent_error_handler.py`. This module provides agent-specific error classification and recovery strategies.
 
-> **Important:** An `ErrorClassifier` class already exists in `src/proxima/agent/dynamic_tools/error_detection.py` with its own `classify(error: Exception, context: Optional[ErrorContext])` method and the `ErrorCategory` enum (21 values: FILESYSTEM, NETWORK, AUTHENTICATION, PERMISSION, RESOURCE, TIMEOUT, VALIDATION, CONFIGURATION, DEPENDENCY, GIT, GITHUB, TERMINAL, BUILD, RUNTIME, MEMORY, DISK, SYNTAX, LOGIC, CONCURRENCY, UNKNOWN). The new `AgentErrorHandler` class below **wraps** the existing `ErrorClassifier` for classifying raw terminal output (strings + exit codes) and adds recovery strategy logic. Import and reuse `ErrorCategory` from `error_detection.py` — do NOT redefine it.
+> **Important:** An `ErrorClassifier` class already exists in `src/proxima/agent/dynamic_tools/error_detection.py` with its own `classify(error: Exception, context: Optional[ErrorContext])` method and the `ErrorCategory` enum (20 values: FILESYSTEM, NETWORK, AUTHENTICATION, PERMISSION, RESOURCE, TIMEOUT, VALIDATION, CONFIGURATION, DEPENDENCY, GIT, GITHUB, TERMINAL, BUILD, RUNTIME, MEMORY, DISK, SYNTAX, LOGIC, CONCURRENCY, UNKNOWN). The new `AgentErrorHandler` class below **wraps** the existing `ErrorClassifier` for classifying raw terminal output (strings + exit codes) and adds recovery strategy logic. Import and reuse `ErrorCategory` from `error_detection.py` — do NOT redefine it.
 
 **The `AgentErrorHandler` class maps terminal output to existing `ErrorCategory` values with recovery strategies:**
 
@@ -2342,6 +2347,13 @@ Return `_sessions.get(_current_session_id)` or `None`.
 1. Serialize the full `SessionState` to JSON
 2. Write atomically: write to `{session_id}.tmp`, then rename to `{session_id}.json`
 3. This prevents corruption from interrupted writes
+
+> **Serialization Note:** `SessionContext` contains an `Intent` object (`last_operation`) which uses `IntentType` enum values and `ExtractedEntity` dataclasses. These are NOT directly JSON-serializable. Implement a custom serialization strategy:
+> - `IntentType` → serialize as its `.name` string (e.g., `"GIT_CLONE"`), deserialize via `IntentType[name]`
+> - `ExtractedEntity` → serialize as a dict with `entity_type`, `value`, `confidence`, `source` keys
+> - `Intent` → serialize as a dict with `intent_type` (name string), `confidence`, `entities` (list of dicts), `original_message`
+> - `operation_history` → serialize as a list of Intent dicts (keep only the most recent 20 for size control)
+> - Use a helper pair: `session_context_to_dict(ctx: SessionContext) -> dict` and `session_context_from_dict(data: dict) -> SessionContext`
 
 **Method `_generate_title(messages: List[SessionMessage]) -> str`:**
 1. If an LLM is available, send the first user message with prompt: "Generate a concise title (max 8 words) for this conversation: {first_message}"
@@ -3062,7 +3074,7 @@ Create `tests/test_tool_permissions.py` with the following test cases:
 
 | File | Phases | Changes |
 |---|---|---|
-| `src/proxima/agent/dynamic_tools/robust_nl_processor.py` | 1, 2, 3 | Expand IntentType enum (+28 entries incl. backend intents), add keyword mappings, add entity extraction patterns (packages, scripts, envs, backends, process IDs), enhance SessionContext with new fields (incl. backend checkpoint tracking), add resolve_reference() method, add sub_intents to Intent dataclass, restructure recognize_intent() into 5-layer pipeline |
+| `src/proxima/agent/dynamic_tools/robust_nl_processor.py` | 1, 2, 3 | Expand IntentType enum (+27 entries, bringing total from 27 to 54), add keyword mappings, add entity extraction patterns (packages, scripts, envs, backends, process IDs), enhance SessionContext with new fields (incl. backend checkpoint tracking), add resolve_reference() method, add sub_intents to Intent dataclass, restructure recognize_intent() into 5-layer pipeline |
 | `src/proxima/agent/dynamic_tools/intent_classifier.py` | 1 | Rename IntentType to IntentCategory, add mapping to canonical IntentType |
 | `src/proxima/agent/dynamic_tools/__init__.py` | 1, 14, 16 | Export IntentToolBridge, AgentLoop, SystemPromptBuilder, TodosTool, WebFetchTool, AgenticFetchTool |
 | `src/proxima/tui/screens/agent_ai_assistant.py` | 3, 10, 14, 15, 16 | Replace 5-phase _generate_response with AgentLoop.process_message(), instantiate new components, add consent callback, support streaming display, add session management commands (/new, /sessions, /import, /summarize, /delete), add TodoPillWidget, integrate ToolPermissionManager |
@@ -3087,13 +3099,12 @@ Create `tests/test_tool_permissions.py` with the following test cases:
 | Library | Usage |
 |---|---|
 | `subprocess` (stdlib) | Terminal command execution, git operations, package installation |
-| `asyncio` (stdlib) | Async terminal monitoring, plan execution, streaming |
+| `threading` (stdlib) | Background terminal output reading, synchronous consent wait via `threading.Event`, Worker-based streaming display |
 | `os`, `shutil`, `pathlib` (stdlib) | File system operations, path resolution |
 | `re` (stdlib) | Pattern matching for intent recognition, entity extraction, error classification |
-| `json` (stdlib) | Configuration parsing, result serialization |
+| `json` (stdlib) | Configuration parsing, result serialization, session persistence |
 | `tomllib` (stdlib since Python 3.11) | pyproject.toml parsing for dependency detection |
-| `threading` (stdlib) | Background terminal output reading threads |
-| `uuid` (stdlib) | Terminal ID generation |
+| `uuid` (stdlib) | Terminal ID generation, session ID generation |
 | `logging` (stdlib) | Error logging to file |
 | `time`, `datetime` (stdlib) | Timing, timestamps, backoff calculations |
 | `platform` (stdlib) | OS detection for cross-platform command normalization |
@@ -3102,8 +3113,7 @@ Create `tests/test_tool_permissions.py` with the following test cases:
 | `pydantic` | Tool parameter validation (already used in tool_interface.py) |
 | `pyyaml` | Backend build profile loading (already used in backend_builder.py) |
 | `rich` | Terminal output formatting, syntax highlighting, diff display |
-| `textual` | TUI framework — screens, widgets, messages, containers |
-| Ollama / OpenAI / Anthropic APIs | LLM integration via existing llm_router |
+| `textual` | TUI framework — screens, widgets, messages, containers, Workers for background tasks |
 
 ---
 
